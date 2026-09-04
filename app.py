@@ -99,14 +99,16 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
             labels=(("Price",m["price"]),("Institutional Demand (参考値)" if m["confidence"]<50 else "Institutional Demand",m["demand_score"]),("Top Risk (参考値)" if m["confidence"]<50 else "Top Risk",m["top_risk_score"]),("Dip Quality",m["dip_quality_score"]),("Phase",safe_phase(m["phase"],m["confidence"])),("Confidence",f'{shown(m["confidence"])}% · {confidence_label(m["confidence"])}'))
             for col,(label,value) in zip(st.columns(6),labels): col.metric(label, shown(value) if isinstance(value,(int,float)) else value)
             if m["price"] is None: st.warning("Dip Quality: N/A — Price unavailable。CFTCが取得済みでも価格不足のため正式判定を保留します。")
-        price_rows = metric_df[(metric_df.metric_name == f"{asset.lower()}_price_usd") & metric_df.value.notna()].sort_values("date") if not metric_df.empty else pd.DataFrame()
+        price_rows = metric_df[(metric_df.metric_name == f"{asset.lower()}_price_usd") & metric_df.value.notna()].sort_values(["date", "fetched_at"]).drop_duplicates("date", keep="last") if not metric_df.empty else pd.DataFrame()
         if not price_rows.empty:
             ps = price_rows.set_index("date").value.astype(float)
             stats = {"7D %": ps.pct_change(7).iloc[-1]*100, "30D %": ps.pct_change(30).iloc[-1]*100,
                      "90D %": ps.pct_change(90).iloc[-1]*100, "50DMA": ps.rolling(50).mean().iloc[-1],
-                     "200DMA": ps.rolling(200).mean().iloc[-1], "Drawdown %": (ps.iloc[-1]/ps.cummax().iloc[-1]-1)*100}
-            for col,(label,value) in zip(st.columns(6),stats.items()): col.metric(label, shown(value))
-            st.caption(f"Price source/type: {price_rows.iloc[-1].source} · freshness: daily")
+                     "200DMA": ps.rolling(200).mean().iloc[-1], "Drawdown %": (ps.iloc[-1]/ps.cummax().iloc[-1]-1)*100,
+                     "ATH distance %": (ps.iloc[-1]/ps.max()-1)*100}
+            for col,(label,value) in zip(st.columns(7),stats.items()): col.metric(label, shown(value))
+            latest_price = price_rows.iloc[-1]
+            st.markdown(f"**Price Source:** {latest_price.source}　 **Price Type:** {latest_price.price_type or 'N/A'}")
         asset_cot=[x for x in cot if x["asset"]==asset]; cot_df=pd.DataFrame(asset_cot)
         if asset_cot:
             last=max(x["report_date"] for x in asset_cot); published=scheduled_publication_date(last)
@@ -126,9 +128,13 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
             if asset_etfs.empty: missing.append("ETF holdings")
             if not asset_cot: missing.extend(["CFTC Managed Money", "Open Interest"])
             st.caption("不足データ / Missing: " + (", ".join(missing) if missing else "なし。スコアは実測入力のみ。"))
+        expected_funds = {"GOLD": {"GLD", "IAU"}, "SILVER": {"SLV"}}[asset]
+        available_funds = set(asset_etfs.fund) if not asset_etfs.empty else set()
+        etf_status = "OK" if available_funds == expected_funds else "PARTIAL" if available_funds else "N/A"
+        st.markdown(f"**ETF Data:** {', '.join(sorted(available_funds)) or 'N/A'}　 **ETF Status:** {etf_status}")
         st.subheader("ETF (official sponsor data)")
         if asset_etfs.empty: st.info("Holdings / shares outstanding / flow: N/A")
-        else: st.dataframe(asset_etfs.groupby("fund").tail(1)[["fund","date","shares_outstanding","ounces","tonnes","nav","flow","flow_status","source"]], hide_index=True, width="stretch")
+        else: st.dataframe(asset_etfs.groupby("fund").tail(1)[["fund","effective_date","shares_outstanding","physical_holdings","holdings_unit","net_assets","flow","flow_status","status","fetched_at","source"]], hide_index=True, width="stretch")
 with tabs[4]:
     st.header("BTC / Gold / Silver Compare")
     frame=pd.DataFrame(metal_snapshots)
@@ -149,6 +155,8 @@ with tabs[6]:
     st.subheader("Gold / Silver sources")
     st.write("CFTC Public Reporting (official):", "OK" if cot else "UNAVAILABLE")
     st.write("ETF official sponsor feeds:", "OK" if etfs else "UNAVAILABLE（取得項目を推計しません）")
+    if etfs:
+        st.dataframe(pd.DataFrame(etfs)[["fund","asset","source","status","effective_date","fetched_at","error"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Data Status / Freshness SLA")
     statuses=[]
     for asset in ("BTC","GOLD","SILVER"):
