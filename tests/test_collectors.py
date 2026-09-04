@@ -4,6 +4,7 @@ from collectors.btc_price import BTCPriceCollector
 from collectors.coinmetrics import CoinMetricsCollector
 from collectors.glassnode import GlassnodeCollector
 from collectors.base import MetricStatus
+from collectors.onchain import OnChainCollector
 
 def client(handler): return httpx.Client(transport=httpx.MockTransport(handler))
 
@@ -22,3 +23,12 @@ def test_missing_value_not_zero():
 def test_glassnode_without_key():
     assert all(p.status == MetricStatus.UNAVAILABLE_NO_API_KEY and p.value is None for p in GlassnodeCollector(None).fetch_latest())
 
+def test_global_mvrv_calculation():
+    payload={"data":[{"time":"2026-01-01T00:00:00Z","CapMrktCurUSD":"900","CapRealUSD":"300","SplyCur":"10"}]}
+    points=OnChainCollector(client=client(lambda r: httpx.Response(200,json=payload))).fetch_history(date(2026,1,1),date(2026,1,1))
+    mvrv=next(p for p in points if p.metric_name=="global_mvrv")
+    assert mvrv.value==3 and mvrv.source=="CALCULATED_FROM_MARKET_CAP_REALIZED_CAP"
+
+def test_glassnode_plan_error():
+    c=GlassnodeCollector("not-logged",client=client(lambda r:httpx.Response(403,json={})),retries=1)
+    assert all(p.status==MetricStatus.UNAVAILABLE_PLAN for p in c.fetch_latest())

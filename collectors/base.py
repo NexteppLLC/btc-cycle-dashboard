@@ -21,6 +21,7 @@ class MetricStatus(StrEnum):
     ERROR = "ERROR"
     PENDING = "PENDING"
     UNAVAILABLE = "UNAVAILABLE"
+    UNAVAILABLE_PLAN = "UNAVAILABLE_PLAN"
     UNAVAILABLE_NO_API_KEY = "UNAVAILABLE_NO_API_KEY"
 
 
@@ -71,5 +72,5 @@ class HTTPCollector(BaseCollector):
 
 def unavailable(metric: str, source: str, status: MetricStatus = MetricStatus.ERROR) -> MetricPoint:
     now = datetime.now(timezone.utc)
-    return MetricPoint(metric_name=metric, timestamp=now, value=None, source=source, fetched_at=now, status=status)
-
+    return MetricPoint(metric_name=metric, timestamp=now, value=None, source=source, fetched_at=now, status=status,
+                       metadata={"asset": "BTC"} if source in {"Glassnode", "Coin Metrics Community API v4"} else {})

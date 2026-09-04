@@ -48,6 +48,9 @@ def detect_alerts(values: dict, config: dict) -> list[str]:
     if (values.get("top_risk") or 0) >= 80: alerts.append("TOP_RISK_80")
     if (values.get("lth_distribution") or 0) >= 70: alerts.append("LTH_DISTRIBUTION_70")
     if values.get("sth_mvrv") is not None and values["sth_mvrv"] < w["sth_profitability"]: alerts.append("STH_MVRV_BELOW_1")
+    if values.get("lth_mvrv") is not None and values["lth_mvrv"] >= 3.5: alerts.append("LTH_MVRV_HIGH")
+    if values.get("mvrv_zscore") is not None and values["mvrv_zscore"] >= 7: alerts.append("MVRV_Z_EXTREME")
+    if values.get("sth_state") == "RECOVERY_CONFIRMATION": alerts.append("STH_RECOVERY")
     if values.get("etf_flow_7d") is not None and values["etf_flow_7d"] < w["etf_7d_negative"]: alerts.append("ETF_7D_NEGATIVE")
     if values.get("previous_phase") and values.get("phase") != values["previous_phase"]: alerts.append("CYCLE_PHASE_CHANGE")
     return alerts

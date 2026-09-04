@@ -9,6 +9,7 @@ import yaml
 from collectors.btc_price import BTCPriceCollector
 from collectors.etf_flow import ETFFlowCollector
 from collectors.glassnode import GlassnodeCollector
+from collectors.onchain import OnChainCollector
 from collectors.cftc import CFTCCollector
 from collectors.metals_price import MetalsPriceCollector
 from collectors.metals_etf import MetalsETFCollector
@@ -16,7 +17,7 @@ from config.settings import ROOT, get_settings
 from database.repository import Repository
 from database.session import create_schema, session_scope
 from indicators.etf import etf_aggregates
-from indicators.holders import distribution_score
+from indicators.holders import distribution_score, sth_state
 from indicators.mvrv import calculate_mvrv
 from indicators.technical import calculate_technicals
 from scoring.cycle_score import calculate_cycle_score
@@ -33,7 +34,7 @@ def load_thresholds() -> dict:
 
 def run_update(days: int = 1500) -> dict:
     settings = get_settings(); create_schema(); end = datetime.now(timezone.utc).date(); start = end - timedelta(days=days)
-    collectors = [BTCPriceCollector(timeout=settings.http_timeout_seconds), GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds), ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
+    collectors = [BTCPriceCollector(timeout=settings.http_timeout_seconds), OnChainCollector(timeout=settings.http_timeout_seconds), GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds), ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
     collectors += [MetalsPriceCollector(asset, timeout=settings.http_timeout_seconds) for asset in ("gold", "silver")]
     points = []
     for collector in collectors:
@@ -61,12 +62,22 @@ def run_update(days: int = 1500) -> dict:
         tech = calculate_technicals(prices) if not prices.empty else pd.DataFrame()
         current_tech = tech.iloc[-1].to_dict() if not tech.empty else {}
         flow_rows = by_name.get("etf_flow_usd", []); flow = etf_aggregates(pd.Series([r.value for r in flow_rows]))
-        distribution, dist_coverage = distribution_score({"lth_sopr": latest.get("lth_sopr")})
+        def rolling_z(name: str, window: int = 365):
+            sample = pd.Series([r.value for r in by_name.get(name, []) if r.value is not None], dtype=float).tail(window)
+            return float((sample.iloc[-1] - sample.mean()) / sample.std()) if len(sample) >= 30 and sample.std() else None
+        supply = pd.Series([r.value for r in by_name.get("lth_supply", []) if r.value is not None], dtype=float)
+        supply_change = float((supply.iloc[-1] / supply.iloc[-31] - 1) * 100) if len(supply) > 30 and supply.iloc[-31] else None
+        distribution, dist_coverage = distribution_score({"lth_sopr": latest.get("lth_sopr"),
+            "lth_spent_volume_z": rolling_z("lth_spent_volume"), "lth_realized_profit_z": rolling_z("lth_realized_profit"),
+            "lth_supply_change_pct": supply_change, "cdd_z": rolling_z("cdd")})
         values = {**latest, "global_mvrv": latest.get("global_mvrv") or calculate_mvrv(latest.get("market_cap_usd"), latest.get("realized_cap_usd")), "lth_distribution": distribution, "etf_flow": flow["7d"], "btc_trend": current_tech.get("return_30d"), "trend_deviation": (current_tech.get("price") / current_tech.get("ma_200") - 1) if current_tech.get("ma_200") else None}
+        state = sth_state(values)
+        values["sth_state"] = 100 if state == "RECOVERY_CONFIRMATION" else 0 if state == "STH_STRESS" else None
         cfg = load_thresholds(); cycle = calculate_cycle_score(values, cfg["cycle"]); top = calculate_top_risk(values, cfg["top_risk"])
-        btc_available = {"price": values.get("btc_price_usd") is not None, "lth_mvrv": values.get("lth_mvrv") is not None,
+        btc_available = {"price": values.get("btc_price_usd") is not None, "global_mvrv": values.get("global_mvrv") is not None, "lth_mvrv": values.get("lth_mvrv") is not None,
             "sth_mvrv": values.get("sth_mvrv") is not None, "lth_distribution": distribution is not None,
             "mvrv_zscore": values.get("mvrv_zscore") is not None, "etf": flow["today"] is not None,
+            "sopr": values.get("lth_sopr") is not None or values.get("sth_sopr") is not None or values.get("asopr") is not None,
             "trend": values.get("btc_trend") is not None}
         confidence = weighted_confidence(btc_available, cfg["confidence_weights"]["btc"])
         minimum_met, _ = btc_minimum_data(values)

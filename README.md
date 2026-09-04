@@ -46,6 +46,29 @@ streamlit run app.py
 | 計算したデータ | MVRV、移動平均、騰落率、volatility、RSI、drawdown、各スコア | 上記の保存済み実測値から計算 |
 | 取得不可 | Glassnode未契約指標、未設定/未公表ETF、障害中のAPI | `UNAVAILABLE_NO_API_KEY`, `UNAVAILABLE`, `PENDING`, `ERROR`。数値は `None` |
 
+### オンチェーンAPI調査結果（2026-09-04確認）
+
+分類は **A=キー不要で無料、B=キー必要・無料枠あり、C=有料API必須、D=信頼できる公開APIから取得不可** です。公開仕様として確認できても、本リポジトリの実行環境で外部ネットワークが拒否された項目は実データ検証済みとはしていません。Glassnodeは契約tierにより個別メトリクスの権限が異なります。
+
+| 指標 | 分類 | Free mode / 採用ソース | Glassnode mode |
+|---|---:|---|---|
+| Global MVRV | A | Coin Metrics CommunityのMarket Cap÷Realized Cap。`CALCULATED_FROM_MARKET_CAP_REALIZED_CAP` | C: market/mvrv |
+| MVRV Z-Score | C | N/A（別指標から近似しない） | C |
+| LTH-MVRV / STH-MVRV | C | N/A | C |
+| LTH / STH Realized Price | C | N/A | C |
+| Global Realized Price | A | Coin Metrics CommunityのRealized Cap÷Current Supply | Cでも取得可 |
+| LTH-SOPR / STH-SOPR | C | N/A | C |
+| aSOPR | C | N/A | C |
+| LTH / STH Spent Volume | C | N/A | 契約・endpoint権限を確認後のみ（現状N/A） |
+| LTH / STH Supply | C | N/A | C |
+| LTH Realized Profit / Loss | C | N/A | 契約・endpoint権限を確認後のみ（現状N/A） |
+| CDD / Dormancy | C | Communityで提供を確認できないためN/A | C |
+| Exchange inflow関連 | C | N/A | C（取引所ラベル由来） |
+| Active Addresses / Transaction Count | A | Coin Metrics Community | 同左 |
+| Realized Cap / Market Cap | A | Coin Metrics Community | 同左 |
+
+調査対象のうち、Blockchain.comは価格・チェーン統計の公開Charts API、Mempool.spaceはmempool/ブロック/手数料の公開APIとして有用ですが、上記LTH/STH cohort指標の代替にはしません。CryptoQuant、Bitbo、CoinGlassにも表示ページや提供商品はありますが、無認証の安定した公式APIを本実装の根拠として確認できなかったため採用していません（Dではなく、該当高度指標はC扱い）。画面値をHTMLから無断取得する実装も行いません。
+
 ETF は利用規約や HTML 変更リスクを避けるため、Farside 等を無断スクレイピングしません。利用者が利用許諾を確認した安定 CSV を `ETF_FLOW_CSV_URL` に指定します。CSV がなければ Pending のままで、架空値は表示しません。
 
 ### 公式仕様の確認について
@@ -75,7 +98,7 @@ GitHub では **Settings → Secrets and variables → Actions** に `GLASSNODE_
 
 ### Cycle Score
 
-初期重みは LTH-MVRV 25%、STH-MVRV 20%、LTH Distribution 20%、ETF Flow 15%、MVRV Z 10%、BTC 30日トレンド 10%。絶対範囲を0–100へ正規化し、欠損成分を0とは扱わず**利用可能成分だけで再ウェイト**します。寄与点と理由は `scoring_detail` に保存します。coverage 低下は Confidence に反映されます。
+初期重みは LTH-MVRV 25%、STH-MVRV 20%、LTH Distribution 20%、ETF Flow 10%、MVRV Z 10%、BTC 30日トレンド 10%、STH Stress/Recovery 5%。絶対範囲を0–100へ正規化し、欠損成分を0とは扱わず**利用可能成分だけで再ウェイト**します。寄与点と理由は `scoring_detail` に保存します。coverage 低下は Confidence に反映されます。
 
 ### LTH Distribution
 
@@ -87,7 +110,7 @@ LTH-MVRV、MVRV Z、LTH SOPR、Distribution、STH-MVRV、ETF divergence、200DMA
 
 ### Confidence
 
-利用可能なスコア重みを基礎とし、Glassnode未接続、ETF Pending、古いデータ、履歴不足、矛盾を減点します。Confidence が低い判定は断定材料にしないでください。
+入力充足率は Price 10%、Global MVRV 10%、MVRV Z 10%、LTH-MVRV 15%、STH-MVRV 15%、LTH Distribution 20%、SOPR 10%、ETF 5%、Trend 5%です。50%未満、またはPrice・Trend・major on-chain 2指標という最低条件未達ならPhaseは`PARTIAL`です。
 
 ## 更新・履歴・レポート
 

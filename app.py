@@ -10,6 +10,8 @@ from collectors.cftc import scheduled_publication_date
 from database.repository import Repository
 from database.session import create_schema, session_scope
 from scoring.regime import PHASE_JA
+from indicators.holders import sth_state
+from indicators.normalization import change_summary, multi_horizon_stats
 
 st.set_page_config(page_title="BTC Market Cycle", page_icon="₿", layout="wide")
 st.markdown("""<style>.stApp{background:#07111f;color:#edf2f7}.kpi{background:#111e30;border:1px solid #263850;border-radius:12px;padding:18px}.muted{color:#91a4ba}.status{font-size:1.15rem;font-weight:700}</style>""", unsafe_allow_html=True)
@@ -83,13 +85,50 @@ with tabs[1]:
         for col, (label, value) in zip(st.columns(7), values.items()): col.metric(label, shown(value))
         st.caption(f"Price source: {btc_prices.iloc[-1].source} · daily close/current candle · freshness: daily")
     st.header("MVRV / Cost Basis")
-    names = ["global_mvrv", "mvrv_zscore", "lth_mvrv", "sth_mvrv", "realized_price", "lth_realized_price", "sth_realized_price"]
+    if latest:
+        hero = (("LTH-MVRV", latest["lth_mvrv"]), ("STH-MVRV", latest["sth_mvrv"]),
+                ("LTH Distribution", latest["lth_distribution"]), ("MVRV Z-Score", latest["mvrv_zscore"]),
+                ("Cycle Score", latest["cycle_score"]), ("Top Risk", latest["top_risk_score"]),
+                ("Phase", safe_phase(latest["cycle_phase"], latest["confidence"])),
+                ("Confidence", f'{shown(latest["confidence"])}%'))
+        for col, (label, value) in zip(st.columns(4), hero):
+            col.metric(label, shown(value) if isinstance(value, (float, int)) else value)
+    names = ["global_mvrv", "lth_mvrv", "sth_mvrv", "mvrv_zscore"]
     for col, name in zip(st.columns(4), names):
         rows = metric_df[metric_df.metric_name == name] if not metric_df.empty else pd.DataFrame()
-        if rows.empty: col.metric(name, "Glassnode API未接続 / 取得不可")
+        if rows.empty: col.metric(name, "N/A")
         else:
-            row = rows.iloc[-1]; col.metric(name, shown(row.value)); col.caption(f'{row.source} · {row.fetched_at}')
-    st.caption("期間: 30D / 90D / 1Y / 2Y / 4Y / ALL（保存済み履歴に応じて表示）")
+            rows = rows.sort_values(["date", "fetched_at"]); row = rows.iloc[-1]
+            summary = change_summary(rows.value); stats = multi_horizon_stats(rows.value)
+            col.metric(name, shown(row.value), delta=f'1D {shown(summary["daily_change"], ".3f")} / 7D {shown(summary["change_7d"], ".3f")}')
+            col.caption(f'{row.source} · {row.status} · {row.fetched_at} · 52W pct {shown(stats["percentile_52w"], ".2f")}')
+    period = st.selectbox("Realized Price Zones期間", ["90D", "1Y", "2Y", "4Y", "ALL"], index=1)
+    period_days = {"90D":90, "1Y":365, "2Y":730, "4Y":1461, "ALL":None}[period]
+    cost_names = {"btc_price_usd":"BTC Price", "realized_price":"Global Realized Price",
+                  "lth_realized_price":"LTH Realized Price", "sth_realized_price":"STH Realized Price"}
+    cost = metric_df[metric_df.metric_name.isin(cost_names)] if not metric_df.empty else pd.DataFrame()
+    if not cost.empty:
+        cost = cost.sort_values(["date","fetched_at"]).drop_duplicates(["date","metric_name"],keep="last")
+        if period_days: cost = cost[cost.date >= (pd.Timestamp.utcnow().date()-pd.Timedelta(days=period_days))]
+        chart = cost.pivot(index="date",columns="metric_name",values="value").rename(columns=cost_names)
+        st.plotly_chart(px.line(chart, title="BTC Price / Realized Price Zones"), width="stretch")
+    st.subheader("Holder Behaviour")
+    holder_names = ["lth_sopr","sth_sopr","lth_spent_volume","sth_spent_volume","lth_supply","sth_supply","cdd"]
+    holder_values = {}
+    for col, name in zip(st.columns(4), holder_names):
+        rows = metric_df[(metric_df.metric_name == name) & metric_df.value.notna()] if not metric_df.empty else pd.DataFrame()
+        value = None if rows.empty else float(rows.sort_values("timestamp").iloc[-1].value); holder_values[name] = value
+        col.metric(name, shown(value, ".3f"))
+    if latest:
+        state = sth_state({**latest, "btc_price_usd": latest["btc_price"]})
+        st.write("**STH state:**", state or "N/A")
+        missing = [label for label,key in (("LTH-MVRV","lth_mvrv"),("STH-MVRV","sth_mvrv"),("MVRV Z","mvrv_zscore"),("LTH Distribution","lth_distribution")) if latest.get(key) is None]
+        text = f"現在のフェーズは{safe_phase(latest['cycle_phase'], latest['confidence'])}。"
+        if latest["lth_distribution"] is not None: text += f"長期保有者の分配スコアは{latest['lth_distribution']:.1f}。"
+        if latest["sth_mvrv"] is not None: text += "短期保有者は平均的に含み益。" if latest["sth_mvrv"] >= 1 else "短期保有者は平均的に含み損。"
+        if missing: text += " 欠損: " + "、".join(missing) + "。欠損値は推定していません。"
+        st.info("**Daily Interpretation:** " + text)
+    st.caption("LTH = Long-Term Holder / STH = Short-Term Holder。Glassnode利用時は公式の155日分類を変更しません。")
 for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
     with tab:
         st.header(f"{asset.title()} Institutional Flow")
@@ -152,7 +191,8 @@ with tabs[5]:
         st.subheader("Phase History"); st.dataframe(changes, hide_index=True, width="stretch")
 with tabs[6]:
     st.header("System / Data Provenance")
-    st.write("モード:", "Glassnode接続" if get_settings().glassnode_api_key else "FREE MODE（Glassnode API未接続）")
+    st.write("モード:", "GLASSNODE MODE" if get_settings().glassnode_api_key else "FREE MODE")
+    if not get_settings().glassnode_api_key: st.info("LTH/STH高度指標はGlassnode API接続で利用可能")
     if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Gold / Silver sources")
     st.write("CFTC Public Reporting (official):", "OK" if cot else "UNAVAILABLE")
