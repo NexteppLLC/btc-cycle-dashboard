@@ -1,0 +1,44 @@
+cycle:
+  weights:
+    lth_mvrv: 0.25
+    sth_mvrv: 0.20
+    lth_distribution: 0.20
+    etf_flow: 0.15
+    mvrv_zscore: 0.10
+    btc_trend: 0.10
+  ranges:
+    lth_mvrv: [1.0, 4.0]
+    sth_mvrv: [0.8, 1.8]
+    etf_flow: [-500000000, 500000000]
+    mvrv_zscore: [0.0, 7.0]
+    btc_trend: [-0.25, 0.50]
+top_risk:
+  weights:
+    lth_mvrv: 0.20
+    mvrv_zscore: 0.18
+    lth_sopr: 0.12
+    lth_distribution: 0.20
+    sth_mvrv: 0.10
+    etf_divergence: 0.10
+    trend_deviation: 0.10
+warnings:
+  historical_percentile: 0.90
+  distribution_high: 70
+  distribution_extreme: 80
+  trend_deviation_high: 0.50
+  sth_profitability: 1.0
+  etf_7d_negative: 0
+phase:
+  top_risk: 75
+  distribution: 70
+  late_bull: 68
+  mid_bull: 42
+  early_bull: 25
+confidence:
+  missing_penalty: 8
+  glassnode_penalty: 18
+  stale_penalty: 8
+  etf_pending_penalty: 8
+  history_penalty: 8
+  contradiction_penalty: 5
+
