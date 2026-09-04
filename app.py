@@ -19,20 +19,22 @@ create_schema()
 def load_data():
     with session_scope() as session:
         repo = Repository(session)
-        snapshots = repo.snapshots(); metrics = repo.metrics()
-        return ([{c.name: getattr(x, c.name) for c in x.__table__.columns} for x in snapshots], [{c.name: getattr(x, c.name) for c in x.__table__.columns} for x in metrics])
+        snapshots = repo.snapshots(); metrics = repo.metrics(); metals = repo.metal_snapshots()
+        cot = repo.cot("gold") + repo.cot("silver")
+        serialize = lambda rows: [{c.name: getattr(x, c.name) for c in x.__table__.columns} for x in rows]
+        return serialize(snapshots), serialize(metrics), serialize(metals), serialize(cot)
 
 
 def shown(value, fmt=".1f"):
     return "取得不可" if value is None or pd.isna(value) else format(value, fmt)
 
 
-snapshots, metrics = load_data(); latest = snapshots[-1] if snapshots else None
+snapshots, metrics, metal_snapshots, cot = load_data(); latest = snapshots[-1] if snapshots else None
 st.title("₿ BTC MARKET CYCLE")
 st.caption("価格・オンチェーン・保有者行動・ETF需要を複合評価する分析支援ツール")
 st.warning("本ダッシュボードは金融・投資助言ではありません。欠損データを0や推測値で補完しません。")
 
-tabs = st.tabs(["Overview", "MVRV", "Holders", "ETF", "Technical", "History", "System"])
+tabs = st.tabs(["Overview", "Bitcoin", "Gold", "Silver", "Compare", "History", "System"])
 with tabs[0]:
     if not latest:
         st.info("保存済みデータがありません。`python scripts/update_data.py` を実行してください。")
@@ -48,6 +50,12 @@ with tabs[0]:
         if previous and previous["cycle_phase"] != latest["cycle_phase"]: st.warning(f'{previous["cycle_phase"]} → {latest["cycle_phase"]}')
         else: st.info("本日の重要なレジーム変化はありません")
         st.caption("スコアは利用可能な実測値のみを再ウェイトして算出。低いConfidenceでは断定的に解釈しないでください。")
+    latest_metals = {x["asset"]: x for x in metal_snapshots if x["date"] == max((m["date"] for m in metal_snapshots), default=None)}
+    st.subheader("3資産クイック比較")
+    for col, asset in zip(st.columns(3), ("BTC", "GOLD", "SILVER")):
+        if asset == "BTC" and latest: col.markdown(f"**BTC**  \nCycle {shown(latest['cycle_score'])} · Top {shown(latest['top_risk_score'])}  \n`{latest['cycle_phase']}`")
+        elif asset in latest_metals:
+            m=latest_metals[asset]; col.markdown(f"**{asset}**  \nDemand {shown(m['demand_score'])} · Top {shown(m['top_risk_score'])} · Dip {shown(m['dip_quality_score'])}  \n`{m['phase']}`")
 
 metric_df = pd.DataFrame(metrics)
 with tabs[1]:
@@ -59,20 +67,27 @@ with tabs[1]:
         else:
             row = rows.iloc[-1]; col.metric(name, shown(row.value)); col.caption(f'{row.source} · {row.fetched_at}')
     st.caption("期間: 30D / 90D / 1Y / 2Y / 4Y / ALL（保存済み履歴に応じて表示）")
-with tabs[2]:
-    st.header("Holder Behaviour")
-    st.metric("LTH Distribution Score", "取得不可" if not latest else f'{shown(latest["lth_distribution"])} / 100')
-    st.info("Glassnode契約指標がない場合、LTH/STH値は推計せず『取得不可』です。利用可能な構成要素だけを再ウェイトしConfidenceを低下させます。")
-with tabs[3]:
-    st.header("米国現物Bitcoin ETF Flow")
-    flows = metric_df[(metric_df.metric_name == "etf_flow_usd") & metric_df.value.notna()] if not metric_df.empty else pd.DataFrame()
-    if flows.empty: st.info("Pending：構造化ETF CSV未設定、または当日データ未公表です。前回値をコピーしません。")
-    else: st.plotly_chart(px.bar(flows, x="date", y="value", title="ETF日次純流入 (USD)"), use_container_width=True)
+for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
+    with tab:
+        st.header(f"{asset.title()} Institutional Flow")
+        rows=[x for x in metal_snapshots if x["asset"]==asset]; m=rows[-1] if rows else None
+        if not m: st.info("取得済みデータなし / Unavailable")
+        else:
+            labels=(("Price",m["price"]),("Institutional Demand",m["demand_score"]),("Top Risk",m["top_risk_score"]),("Dip Quality",m["dip_quality_score"]),("Phase",m["phase"]),("Confidence",m["confidence"]))
+            for col,(label,value) in zip(st.columns(6),labels): col.metric(label, shown(value) if isinstance(value,(int,float)) else value)
+        asset_cot=[x for x in cot if x["asset"]==asset]; cot_df=pd.DataFrame(asset_cot)
+        if asset_cot:
+            last=max(x["report_date"] for x in asset_cot); st.info(f"CFTC COTは週次（火曜時点、金曜公表）。Last COT report: {last} · Next expected update: Friday · Age: {(datetime.now(timezone.utc).date()-last).days} days。日次価格とはタイムスタンプが異なります。")
+            mm=cot_df[cot_df.category=="managed_money"]
+            st.plotly_chart(px.line(mm,x="report_date",y=["long","short","net"],title=f"{asset} Managed Money / Net"),use_container_width=True)
+            st.plotly_chart(px.line(mm,x="report_date",y="open_interest",title="Open Interest"),use_container_width=True)
+        st.caption("Price↑+OI↑: 新規参加 / Price↑+OI↓: short covering / Price↓+OI↑: 新規short / Price↓+OI↓: liquidation")
+        st.warning("ETF holdings/flow は公式構造化データを取得できない場合 Unavailable。holdings changeを実測flowとして表示しません。")
 with tabs[4]:
-    st.header("Technical")
-    prices = metric_df[(metric_df.metric_name == "btc_price_usd") & metric_df.value.notna()] if not metric_df.empty else pd.DataFrame()
-    if prices.empty: st.info("BTC価格履歴がありません。")
-    else: st.plotly_chart(px.line(prices, x="date", y="value", title="BTC/USD（実測取得値）"), use_container_width=True)
+    st.header("BTC / Gold / Silver Compare")
+    frame=pd.DataFrame(metal_snapshots)
+    if frame.empty: st.info("Gold/Silverデータなし")
+    else: st.dataframe(frame[["asset","price","demand_score","top_risk_score","dip_quality_score","phase","confidence","date"]].groupby("asset").tail(1),hide_index=True,use_container_width=True)
 with tabs[5]:
     st.header("History")
     frame = pd.DataFrame(snapshots)
@@ -85,5 +100,7 @@ with tabs[6]:
     st.header("System / Data Provenance")
     st.write("モード:", "Glassnode接続" if get_settings().glassnode_api_key else "FREE MODE（Glassnode API未接続）")
     if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, use_container_width=True)
+    st.subheader("Gold / Silver sources")
+    st.write("CFTC Public Reporting (official):", "OK" if cot else "UNAVAILABLE")
+    st.write("ETF provider structured feeds:", "UNAVAILABLE（未設定。値は推計しません）")
     st.caption(f"表示時刻: {datetime.now(timezone.utc).isoformat()} · UI cache TTL: {get_settings().cache_ttl_seconds}秒")
-
