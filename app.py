@@ -118,7 +118,9 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
             st.plotly_chart(px.line(mm,x="report_date",y="open_interest",title="Open Interest"), width="stretch")
         st.caption("Price↑+OI↑: 新規参加 / Price↑+OI↓: short covering / Price↓+OI↑: 新規short / Price↓+OI↓: liquidation")
         st.warning("ETF holdings/flow は公式構造化データを取得できない場合 Unavailable。holdings changeを実測flowとして表示しません。")
-        asset_etfs = pd.DataFrame([x for x in etfs if x["asset"] == asset])
+        # Parse/schema diagnostics remain visible in System, but must not make an
+        # unavailable sponsor snapshot look usable to the UI or scoring status.
+        asset_etfs = pd.DataFrame([x for x in etfs if x["asset"] == asset and x["status"] == "OK"])
         if m:
             demand_state = "Strong Buying" if (m["demand_score"] or 0) >= 75 else "Moderate Buying" if (m["demand_score"] or 0) >= 55 else "Neutral / Weak"
             risk_state = "Elevated" if (m["top_risk_score"] or 0) >= 60 else "Normal"
@@ -163,6 +165,6 @@ with tabs[6]:
         price_name="btc_price_usd" if asset=="BTC" else f"{asset.lower()}_price_usd"
         pr=metric_df[(metric_df.metric_name==price_name) & metric_df.value.notna()] if not metric_df.empty else pd.DataFrame()
         statuses.append({"asset":asset,"Price":"OK" if not pr.empty else "ERROR","CFTC":"N/A" if asset=="BTC" else ("OK" if any(x["asset"]==asset for x in cot) else "ERROR"),
-            "ETF":"OK" if any(x["asset"]==asset for x in etfs) else "N/A","On-chain":"PARTIAL" if asset=="BTC" and latest and latest["confidence"]<100 else ("OK" if asset=="BTC" else "N/A"),"Price SLA":"daily","CFTC SLA":"weekly" if asset!="BTC" else "N/A"})
+            "ETF":"OK" if any(x["asset"]==asset and x["status"]=="OK" for x in etfs) else "N/A","On-chain":"PARTIAL" if asset=="BTC" and latest and latest["confidence"]<100 else ("OK" if asset=="BTC" else "N/A"),"Price SLA":"daily","CFTC SLA":"weekly" if asset!="BTC" else "N/A"})
     st.dataframe(pd.DataFrame(statuses),hide_index=True,width="stretch")
     st.caption(f"表示時刻: {datetime.now(timezone.utc).isoformat()} · UI cache TTL: {get_settings().cache_ttl_seconds}秒")
