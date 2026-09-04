@@ -131,3 +131,49 @@ pytest -q
 ## 現在の制約と次の改善
 
 APIキーなしでは有料オンチェーン指標を実データ検証できません。ETFの普遍的な公式無料APIも前提にせず、許諾済みCSV方式です。次は Glassnode metadata に基づく動的 capability discovery、全履歴 percentile/rolling z-scoreのスナップショット保存、ファンド別ETF比較、取引日カレンダー対応、freshnessの指標別SLA、通知adapter（Email/Slack/Discord/Telegram）を追加するのが適切です。
+# Gold / Silver Institutional Flow (Phase 2)
+
+The dashboard compares BTC with COMEX Gold and Silver for medium-term swing analysis. It adds
+Institutional Demand, Top Risk, Buy-the-Dip Quality, divergence, phase and confidence. This is an
+analysis-support tool, **not financial advice**; unavailable observations remain `N/A` and are never
+replaced by zero or invented values.
+
+## CFTC positioning and freshness
+
+The collector uses the CFTC's official **Disaggregated Futures Only** public dataset (`72hh-3qpy`):
+Gold contract market code `088691` and Silver `084691`. Producer/Merchant, Swap Dealer, Managed
+Money, Other Reportable and Nonreportable long/short/spreading positions plus open interest are
+stored with source, effective report date, fetch time and status. COT observations describe Tuesday
+positions and are normally released Friday; they remain weekly and are not forward-filled as daily
+facts. Price/COT timestamp differences and age appear in the UI.
+
+Managed Money analytics include net (`long - short`), ratios to OI, 1/4/13-week changes, z-score and
+52-week/3-year/full-history percentiles. Insufficient history produces `N/A`. Price/OI combinations
+distinguish participation, short covering, new shorts and liquidation.
+
+## Scores
+
+Weights are auditable in `config/thresholds.yaml`. Institutional Demand is 25% MM trend, 15% MM
+percentile, 20% ETF, 15% OI confirmation, 10% commercials, 10% divergence and 5% trend. Top Risk
+combines MM net/long extremes, long-MA distance, ETF exhaustion, bearish divergence, OI,
+commercials and momentum. Dip Quality is emitted only during a drawdown and combines drawdown
+shape, position reset, ETF stability, OI reset, commercial covering, long trend and reaccumulation;
+the BAD_DIP conjunction caps the result. Silver has separate, more volatility-tolerant thresholds.
+
+## ETF data and limitations
+
+GLD, IAU and SLV are represented by the additive `etf_holdings` schema. Only official/provider
+structured feeds should populate holdings, shares, ounces/tonnes, NAV and flow. No fragile HTML
+scraper is used: until such a feed is configured, ETF values are `UNAVAILABLE`. Holdings change and
+shares change are not called measured flow; any future inferred flow must carry `ESTIMATED` status.
+World Gold Council regional data likewise remains unavailable rather than guessed.
+
+Backfill ten years (or specify dates):
+
+```bash
+python scripts/backfill.py --asset gold
+python scripts/backfill.py --asset silver
+```
+
+The daily GitHub Actions job updates all prices and checks CFTC for a new weekly observation. Long
+history is persisted in SQLite and Streamlit reads cached DB results rather than fetching on render.

@@ -10,6 +10,8 @@ from collectors.btc_price import BTCPriceCollector
 from collectors.coinmetrics import CoinMetricsCollector
 from collectors.etf_flow import ETFFlowCollector
 from collectors.glassnode import GlassnodeCollector
+from collectors.cftc import CFTCCollector
+from collectors.metals_price import MetalsPriceCollector
 from config.settings import ROOT, get_settings
 from database.repository import Repository
 from database.session import create_schema, session_scope
@@ -20,6 +22,7 @@ from indicators.technical import calculate_technicals
 from scoring.cycle_score import calculate_cycle_score
 from scoring.regime import calculate_confidence, classify_phase
 from scoring.top_risk import calculate_top_risk
+from scoring.metals import calculate_metals_scores, percentile, position_statistics
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ def load_thresholds() -> dict:
 def run_update(days: int = 1500) -> dict:
     settings = get_settings(); create_schema(); end = datetime.now(timezone.utc).date(); start = end - timedelta(days=days)
     collectors = [CoinMetricsCollector(timeout=settings.http_timeout_seconds), BTCPriceCollector(timeout=settings.http_timeout_seconds), GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds), ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
+    collectors += [MetalsPriceCollector(asset, timeout=settings.http_timeout_seconds) for asset in ("gold", "silver")]
     points = []
     for collector in collectors:
         try: points.extend(collector.fetch_history(start, end))
@@ -53,5 +57,32 @@ def run_update(days: int = 1500) -> dict:
         confidence = calculate_confidence(coverage=min(cycle.coverage, top.coverage) if top.coverage else cycle.coverage, glassnode=glassnode_ok, etf_current=flow["today"] is not None, history_sufficient=len(prices) >= 200, config=cfg)
         snapshot = repo.upsert_snapshot({"date": end, "btc_price": latest.get("btc_price_usd"), "global_mvrv": values["global_mvrv"], "mvrv_zscore": latest.get("mvrv_zscore"), "lth_mvrv": latest.get("lth_mvrv"), "sth_mvrv": latest.get("sth_mvrv"), "lth_realized_price": latest.get("lth_realized_price"), "sth_realized_price": latest.get("sth_realized_price"), "lth_sopr": latest.get("lth_sopr"), "sth_sopr": latest.get("sth_sopr"), "lth_spent_volume": latest.get("lth_spent_volume"), "sth_spent_volume": latest.get("sth_spent_volume"), "etf_flow_1d": flow["today"], "etf_flow_7d": flow["7d"], "lth_distribution": distribution, "cycle_score": cycle.score, "top_risk_score": top.score, "cycle_phase": phase, "confidence": confidence})
         repo.replace_scoring_details(end, cycle.details + top.details)
-        return {"snapshot": snapshot, "points": len(points), "distribution_coverage": dist_coverage}
-
+        metal_snapshots = []
+        for asset in ("gold", "silver"):
+            try:
+                cot_records = CFTCCollector(asset, timeout=settings.http_timeout_seconds).fetch_history(end - timedelta(days=max(days, 3650)), end)
+                repo.upsert_cot(cot_records); session.flush()
+            except Exception as exc:
+                logger.error("%s CFTC collection failed: %s", asset, type(exc).__name__)
+            cot_rows = repo.cot(asset)
+            mm = [{"report_date": r.report_date, "long": r.long, "short": r.short, "net": r.net, "open_interest": r.open_interest} for r in cot_rows if r.category == "managed_money"]
+            producer = [r for r in cot_rows if r.category == "producer_merchant"]
+            stats = position_statistics(mm)
+            metal_prices = pd.Series({r.date: r.value for r in by_name.get(f"{asset}_price_usd", []) if r.value is not None}, dtype=float)
+            mtech = calculate_technicals(metal_prices) if not metal_prices.empty else pd.DataFrame(); mt = mtech.iloc[-1].to_dict() if not mtech.empty else {}
+            pchange = float(metal_prices.pct_change().iloc[-1]) if len(metal_prices)>1 else None
+            values_m = {"mm_percentile": stats.get("percentile_52w"), "mm_long_percentile": percentile([x["long"] for x in mm[-52:] if x.get("long") is not None], stats.get("long"), 20) if stats.get("long") is not None else None,
+                "mm_change": stats.get("change_1w"), "mm_trend_score": 75 if (stats.get("change_4w") or 0)>0 else 25,
+                "oi_change": stats.get("oi_change_1w"), "oi_percentile": percentile([x["open_interest"] for x in mm[-52:] if x.get("open_interest") is not None], stats.get("open_interest"), 20) if stats.get("open_interest") is not None else None,
+                "oi_score": 75 if pchange is not None and pchange>0 and (stats.get("oi_change_1w") or 0)>0 else 50,
+                "commercial_change": producer[-1].net-producer[-2].net if len(producer)>1 and producer[-1].net is not None and producer[-2].net is not None else None,
+                "commercial_score": 75 if len(producer)>1 and producer[-1].net is not None and producer[-2].net is not None and producer[-1].net>producer[-2].net else 50,
+                "price_change": pchange, "trend_score": 75 if mt.get("ma_200") and mt.get("price",0)>mt["ma_200"] else 25,
+                "above_200dma": bool(mt.get("ma_200") and mt.get("price",0)>mt["ma_200"]), "drawdown": mt.get("drawdown_ath"),
+                "position_reset": 70 if stats.get("change_13w") is not None and stats["change_13w"]<0 and (stats.get("percentile_52w") or 0)>20 else 40,
+                "oi_reset": 70 if (stats.get("oi_change_1w") or 0)<0 else 40, "reaccumulation": 70 if (stats.get("change_1w") or 0)>0 else 40,
+                "cot_stale": bool(mm and (end-mm[-1]["report_date"]).days>10)}
+            scores = calculate_metals_scores(values_m, cfg["metals"], asset)
+            metal_snapshots.append(repo.upsert_metal_snapshot({"asset": asset.upper(), "date": end, "price": mt.get("price"), "demand_score": scores.demand,
+                "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality, "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
+        return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points), "distribution_coverage": dist_coverage}

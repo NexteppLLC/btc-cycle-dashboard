@@ -57,3 +57,54 @@ class ScoringDetail(Base):
     contribution: Mapped[float | None] = mapped_column(Float)
     reason: Mapped[str] = mapped_column(String(500))
 
+
+class COTPosition(Base):
+    """Weekly CFTC disaggregated position (never forward-filled to daily rows)."""
+    __tablename__ = "cot_positions"
+    __table_args__ = (UniqueConstraint("asset", "report_date", "category", name="uq_cot_asset_week_category"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset: Mapped[str] = mapped_column(String(12), index=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    category: Mapped[str] = mapped_column(String(40))
+    long: Mapped[float | None] = mapped_column(Float)
+    short: Mapped[float | None] = mapped_column(Float)
+    spreading: Mapped[float | None] = mapped_column(Float)
+    net: Mapped[float | None] = mapped_column(Float)
+    open_interest: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(200))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40))
+
+
+class ETFHolding(Base):
+    __tablename__ = "etf_holdings"
+    __table_args__ = (UniqueConstraint("asset", "fund", "date", name="uq_etf_asset_fund_day"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset: Mapped[str] = mapped_column(String(12), index=True)
+    fund: Mapped[str] = mapped_column(String(20), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    shares_outstanding: Mapped[float | None] = mapped_column(Float)
+    ounces: Mapped[float | None] = mapped_column(Float)
+    tonnes: Mapped[float | None] = mapped_column(Float)
+    nav: Mapped[float | None] = mapped_column(Float)
+    flow: Mapped[float | None] = mapped_column(Float)
+    flow_status: Mapped[str] = mapped_column(String(40), default="UNAVAILABLE")
+    source: Mapped[str] = mapped_column(String(200))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), default="OK")
+
+
+class MetalsSnapshot(Base):
+    __tablename__ = "metals_snapshot"
+    __table_args__ = (UniqueConstraint("asset", "date", name="uq_metals_asset_day"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset: Mapped[str] = mapped_column(String(12), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    price: Mapped[float | None] = mapped_column(Float)
+    demand_score: Mapped[float | None] = mapped_column(Float)
+    top_risk_score: Mapped[float | None] = mapped_column(Float)
+    dip_quality_score: Mapped[float | None] = mapped_column(Float)
+    phase: Mapped[str] = mapped_column(String(30), default="UNKNOWN")
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    divergence: Mapped[str] = mapped_column(String(40), default="NONE")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

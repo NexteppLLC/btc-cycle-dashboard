@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from collectors.base import MetricPoint
-from .models import DailySnapshot, Metric, ScoringDetail
+from .models import COTPosition, DailySnapshot, ETFHolding, MetalsSnapshot, Metric, ScoringDetail
 
 
 class Repository:
@@ -44,3 +44,26 @@ class Repository:
     def snapshots(self, limit: int = 1500) -> list[DailySnapshot]:
         return list(self.session.scalars(select(DailySnapshot).order_by(DailySnapshot.date.desc()).limit(limit)))[::-1]
 
+    def upsert_cot(self, records: list[dict]) -> None:
+        for values in records:
+            key = {k: values[k] for k in ("asset", "report_date", "category")}
+            row = self.session.scalar(select(COTPosition).filter_by(**key))
+            if row:
+                for name, value in values.items(): setattr(row, name, value)
+            else: self.session.add(COTPosition(**values))
+
+    def cot(self, asset: str, limit: int = 2000) -> list[COTPosition]:
+        query = select(COTPosition).where(COTPosition.asset == asset.upper()).order_by(COTPosition.report_date.desc()).limit(limit)
+        return list(self.session.scalars(query))[::-1]
+
+    def upsert_metal_snapshot(self, values: dict) -> MetalsSnapshot:
+        row = self.session.scalar(select(MetalsSnapshot).filter_by(asset=values["asset"], date=values["date"]))
+        if row:
+            for name, value in values.items(): setattr(row, name, value)
+        else: row = MetalsSnapshot(**values); self.session.add(row)
+        return row
+
+    def metal_snapshots(self, asset: str | None = None) -> list[MetalsSnapshot]:
+        query = select(MetalsSnapshot).order_by(MetalsSnapshot.date)
+        if asset: query = query.where(MetalsSnapshot.asset == asset.upper())
+        return list(self.session.scalars(query))
