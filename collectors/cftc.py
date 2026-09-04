@@ -1,5 +1,5 @@
 """Official CFTC public-data collector for weekly disaggregated futures-only COT."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from collectors.base import HTTPCollector
@@ -13,6 +13,11 @@ CATEGORIES = {
     "other_reportable": ("other_rept_positions_long", "other_rept_positions_short", "other_rept_positions_spread"),
     "nonreportable": ("nonrept_positions_long_all", "nonrept_positions_short_all", None),
 }
+
+
+def scheduled_publication_date(position_date: date) -> date:
+    """Normal Friday publication for Tuesday positions; holiday delays excluded."""
+    return position_date + timedelta(days=3)
 
 
 def _number(row: dict[str, Any], field: str | None) -> float | None:

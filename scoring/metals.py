@@ -71,7 +71,7 @@ def calculate_metals_scores(values: dict, config: dict, asset: str) -> MetalScor
         "oi_extreme": values.get("oi_percentile"), "commercial": values.get("commercial_extreme"), "momentum": values.get("momentum_risk")}
     risk, risk_details = _weighted(risk_inputs, cfg["risk_weights"]); details += risk_details
     drawdown = values.get("drawdown")
-    if drawdown is None or drawdown >= 0: dip = None
+    if values.get("price") is None or drawdown is None or drawdown >= 0: dip = None
     else:
         dip_inputs = {"drawdown": 100 if cfg["dip_min"] <= -drawdown <= cfg["dip_max"] else 35,
             "position_reset": values.get("position_reset"), "etf_stability": values.get("etf_score"),
@@ -79,13 +79,22 @@ def calculate_metals_scores(values: dict, config: dict, asset: str) -> MetalScor
             "long_term_trend": values.get("trend_score"), "reaccumulation": values.get("reaccumulation")}
         dip, dip_details = _weighted(dip_inputs, cfg["dip_weights"]); details += dip_details
         if values.get("above_200dma") is False and (values.get("mm_change") or 0) < 0 and (values.get("etf_change") or 0) < 0 and (values.get("oi_change") or 0) > 0: dip = min(dip or 100, 25)
-    if risk is not None and risk >= cfg["phase"]["top_risk"]: phase = "TOP_RISK"
+    required = {"price": values.get("price") is not None, "cftc_mm": values.get("mm_percentile") is not None,
+                "open_interest": values.get("open_interest") is not None}
+    conf_weights = config.get("confidence_weights", {"price": .20, "cftc_mm": .25, "open_interest": .15,
+        "etf": .20, "divergence": .10, "trend": .10})
+    available = {**required, "etf": values.get("etf_score") is not None,
+        "divergence": values.get("price_change") is not None and values.get("mm_change") is not None,
+        "trend": values.get("trend_score") is not None}
+    confidence = 100 * sum(w for k,w in conf_weights.items() if available.get(k)) / sum(conf_weights.values())
+    minimum_met = all(required.values()) and confidence >= config.get("phase_confidence", 50)
+    if not minimum_met: phase = "PARTIAL"
+    elif risk is not None and risk >= cfg["phase"]["top_risk"]: phase = "TOP_RISK"
     elif values.get("above_200dma") is False: phase = "DISTRIBUTION" if demand is not None and demand >= 40 else "BEAR"
     elif demand is None: phase = "UNKNOWN"
     elif demand >= cfg["phase"]["late_bull"]: phase = "LATE_BULL"
     elif demand >= cfg["phase"]["mid_bull"]: phase = "MID_BULL"
     elif demand >= cfg["phase"]["early_bull"]: phase = "EARLY_BULL"
     else: phase = "ACCUMULATION"
-    coverage = len([v for v in demand_inputs.values() if v is not None]) / len(demand_inputs)
-    confidence = 100*coverage - (15 if values.get("cot_stale") else 0) - (12 if values.get("etf_score") is None else 0) - (8 if values.get("estimated_flow") else 0)
+    confidence -= (15 if values.get("cot_stale") else 0) + (8 if values.get("estimated_flow") else 0)
     return MetalScores(demand, risk, dip, phase, divergence, round(max(0, confidence), 1), details)
