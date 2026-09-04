@@ -63,6 +63,19 @@ class Repository:
         else: row = MetalsSnapshot(**values); self.session.add(row)
         return row
 
+    def upsert_etf_holdings(self, records: list[dict]) -> None:
+        for values in records:
+            key = {k: values[k] for k in ("asset", "fund", "date")}
+            row = self.session.scalar(select(ETFHolding).filter_by(**key))
+            if row:
+                for name, value in values.items(): setattr(row, name, value)
+            else: self.session.add(ETFHolding(**values))
+
+    def etf_holdings(self, asset: str | None = None) -> list[ETFHolding]:
+        query = select(ETFHolding).order_by(ETFHolding.date)
+        if asset: query = query.where(ETFHolding.asset == asset.upper())
+        return list(self.session.scalars(query))
+
     def metal_snapshots(self, asset: str | None = None) -> list[MetalsSnapshot]:
         query = select(MetalsSnapshot).order_by(MetalsSnapshot.date)
         if asset: query = query.where(MetalsSnapshot.asset == asset.upper())

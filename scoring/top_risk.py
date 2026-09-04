@@ -17,7 +17,11 @@ def calculate_top_risk(values: dict[str, float | None], config: dict) -> ScoreRe
     present = {k: v for k, v in scores.items() if v is not None}; coverage = sum(weights[k] for k in present)
     if not present: return ScoreResult(None, 0, [])
     details = [{"component": f"top_{k}", "raw_value": values.get(k), "normalized_score": round(v, 2), "weight": weights[k], "contribution": round(v * weights[k] / coverage, 2), "reason": "天井リスク複合要因（欠損時再ウェイト）"} for k, v in present.items()]
-    return ScoreResult(round(sum(x["contribution"] for x in details), 2), round(coverage, 2), details)
+    # Sum unrounded inputs: rounding every contribution can turn an exact boundary
+    # (notably 100) into 99.99.  Clamp after the final rounding for numerical safety.
+    score = round(sum(scores[k] * weights[k] for k in present) / coverage, 2)
+    score = min(100.0, max(0.0, score))
+    return ScoreResult(score, round(coverage, 2), details)
 
 
 def risk_label(score: float | None) -> str:
@@ -25,4 +29,3 @@ def risk_label(score: float | None) -> str:
     for limit, label in ((30, "Low"), (50, "Normal"), (70, "Caution"), (80, "High"), (90, "Very High")): 
         if score < limit: return label
     return "Extreme"
-

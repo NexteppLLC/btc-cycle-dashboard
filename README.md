@@ -37,8 +37,10 @@ streamlit run app.py
 
 | 区分 | 内容 | ソース/扱い |
 |---|---|---|
-| 本当に取得したデータ | BTC/USD、realized cap、market cap、active addresses、tx count | [Coin Metrics Community API v4](https://docs.coinmetrics.io/api/v4/) の `timeseries/asset-metrics` |
-| fallback 実測値 | BTC/USD | [CoinGecko Demo API](https://docs.coingecko.com/reference/coins-id-market-chart-range)（Coin Metrics価格取得失敗時のみ） |
+| 本当に取得したデータ | BTC/USD daily OHLC close | [Kraken public OHLC](https://docs.kraken.com/api/docs/rest-api/get-ohlc-data/) の `XBTUSD`, interval 1440（primary） |
+| fallback 実測値 | BTC/USD daily close | [Coinbase Exchange public candles](https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductcandles) の `BTC-USD`（300本単位で取得） |
+| spot proxy 実測値 | Gold/Silver USD daily close | Stooq の `XAUUSD` / `XAGUSD` 構造化CSV。DB/UIの source に `USD spot proxy` と明記 |
+| 公式ETF実測値 | GLD / IAU / SLV holdings, shares, NAV（公表ファイルに存在する項目のみ） | [SPDR Gold Shares](https://www.spdrgoldshares.com/usa/historical-data/) / [iShares IAU](https://www.ishares.com/us/products/239561/ishares-gold-trust-fund) / [iShares SLV](https://www.ishares.com/us/products/239855/ishares-silver-trust-fund) のスポンサーCSV |
 | 任意の実測値 | Glassnode 指標 | [Glassnode API](https://docs.glassnode.com/basic-api/api) v1。キーと契約権限がある場合のみ |
 | 任意の実測値 | ETF flow | 管理者が利用条件を確認して指定する構造化 CSV (`date,flow_usd[,fund]`) |
 | 計算したデータ | MVRV、移動平均、騰落率、volatility、RSI、drawdown、各スコア | 上記の保存済み実測値から計算 |
@@ -48,7 +50,7 @@ ETF は利用規約や HTML 変更リスクを避けるため、Farside 等を�
 
 ### 公式仕様の確認について
 
-実装は Coin Metrics Community API v4、Glassnode `/v1/metrics`、CoinGecko market chart range の公式ドキュメント上のインターフェースに分離しています。外部 API は変更され得るため、本番導入前と更新時に上記リンクのパラメータ、提供ティア、利用規約を再確認してください。Glassnode の利用可能メトリクスは契約で異なり、401/403/404 はアプリ停止ではなく `UNAVAILABLE` になります。LTH/STH の 155 日分類をアプリ独自の日数で再定義しません。
+価格実装は API キー不要の Kraken public OHLC を primary、Coinbase Exchange public candles を fallback とします。Krakenの720本制限でも200DMAに必要な履歴を満たし、fallbackは公式の300本上限に従い分割します。外部 API は変更され得るため、本番導入前と更新時に上記リンクのパラメータ、利用規約を再確認してください。Glassnode の利用可能メトリクスは契約で異なり、401/403/404 はアプリ停止ではなく `UNAVAILABLE` になります。
 
 ## FREE MODE
 
@@ -162,10 +164,10 @@ the BAD_DIP conjunction caps the result. Silver has separate, more volatility-to
 
 ## ETF data and limitations
 
-GLD, IAU and SLV are represented by the additive `etf_holdings` schema. Only official/provider
-structured feeds should populate holdings, shares, ounces/tonnes, NAV and flow. No fragile HTML
-scraper is used: until such a feed is configured, ETF values are `UNAVAILABLE`. Holdings change and
-shares change are not called measured flow; any future inferred flow must carry `ESTIMATED` status.
+GLD, IAU and SLV are represented by the additive `etf_holdings` schema. The collector reads only
+official sponsor CSV downloads and populates fields that the published file identifies. Missing
+fields and flow remain `N/A`; holdings/share changes are not relabelled as measured cash flow. Any
+future inferred flow must carry `ESTIMATED` status.
 World Gold Council regional data likewise remains unavailable rather than guessed.
 
 Backfill ten years (or specify dates):

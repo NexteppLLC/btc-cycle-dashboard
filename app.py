@@ -19,17 +19,17 @@ create_schema()
 def load_data():
     with session_scope() as session:
         repo = Repository(session)
-        snapshots = repo.snapshots(); metrics = repo.metrics(); metals = repo.metal_snapshots()
+        snapshots = repo.snapshots(); metrics = repo.metrics(); metals = repo.metal_snapshots(); etfs = repo.etf_holdings()
         cot = repo.cot("gold") + repo.cot("silver")
         serialize = lambda rows: [{c.name: getattr(x, c.name) for c in x.__table__.columns} for x in rows]
-        return serialize(snapshots), serialize(metrics), serialize(metals), serialize(cot)
+        return serialize(snapshots), serialize(metrics), serialize(metals), serialize(cot), serialize(etfs)
 
 
 def shown(value, fmt=".1f"):
     return "取得不可" if value is None or pd.isna(value) else format(value, fmt)
 
 
-snapshots, metrics, metal_snapshots, cot = load_data(); latest = snapshots[-1] if snapshots else None
+snapshots, metrics, metal_snapshots, cot, etfs = load_data(); latest = snapshots[-1] if snapshots else None
 st.title("₿ BTC MARKET CYCLE")
 st.caption("価格・オンチェーン・保有者行動・ETF需要を複合評価する分析支援ツール")
 st.warning("本ダッシュボードは金融・投資助言ではありません。欠損データを0や推測値で補完しません。")
@@ -59,6 +59,15 @@ with tabs[0]:
 
 metric_df = pd.DataFrame(metrics)
 with tabs[1]:
+    btc_prices = metric_df[(metric_df.metric_name == "btc_price_usd") & metric_df.value.notna()].sort_values("date") if not metric_df.empty else pd.DataFrame()
+    if not btc_prices.empty:
+        series = btc_prices.set_index("date").value.astype(float)
+        values = {"Price": series.iloc[-1], "7D": series.pct_change(7).iloc[-1] * 100,
+                  "30D": series.pct_change(30).iloc[-1] * 100, "90D": series.pct_change(90).iloc[-1] * 100,
+                  "50DMA": series.rolling(50).mean().iloc[-1], "100DMA": series.rolling(100).mean().iloc[-1],
+                  "200DMA": series.rolling(200).mean().iloc[-1]}
+        for col, (label, value) in zip(st.columns(7), values.items()): col.metric(label, shown(value))
+        st.caption(f"Price source: {btc_prices.iloc[-1].source} · daily close/current candle · freshness: daily")
     st.header("MVRV / Cost Basis")
     names = ["global_mvrv", "mvrv_zscore", "lth_mvrv", "sth_mvrv", "realized_price", "lth_realized_price", "sth_realized_price"]
     for col, name in zip(st.columns(4), names):
@@ -75,32 +84,44 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
         else:
             labels=(("Price",m["price"]),("Institutional Demand",m["demand_score"]),("Top Risk",m["top_risk_score"]),("Dip Quality",m["dip_quality_score"]),("Phase",m["phase"]),("Confidence",m["confidence"]))
             for col,(label,value) in zip(st.columns(6),labels): col.metric(label, shown(value) if isinstance(value,(int,float)) else value)
+        price_rows = metric_df[(metric_df.metric_name == f"{asset.lower()}_price_usd") & metric_df.value.notna()].sort_values("date") if not metric_df.empty else pd.DataFrame()
+        if not price_rows.empty:
+            ps = price_rows.set_index("date").value.astype(float)
+            stats = {"7D %": ps.pct_change(7).iloc[-1]*100, "30D %": ps.pct_change(30).iloc[-1]*100,
+                     "90D %": ps.pct_change(90).iloc[-1]*100, "50DMA": ps.rolling(50).mean().iloc[-1],
+                     "200DMA": ps.rolling(200).mean().iloc[-1], "Drawdown %": (ps.iloc[-1]/ps.cummax().iloc[-1]-1)*100}
+            for col,(label,value) in zip(st.columns(6),stats.items()): col.metric(label, shown(value))
+            st.caption(f"Price source/type: {price_rows.iloc[-1].source} · freshness: daily")
         asset_cot=[x for x in cot if x["asset"]==asset]; cot_df=pd.DataFrame(asset_cot)
         if asset_cot:
             last=max(x["report_date"] for x in asset_cot); st.info(f"CFTC COTは週次（火曜時点、金曜公表）。Last COT report: {last} · Next expected update: Friday · Age: {(datetime.now(timezone.utc).date()-last).days} days。日次価格とはタイムスタンプが異なります。")
             mm=cot_df[cot_df.category=="managed_money"]
-            st.plotly_chart(px.line(mm,x="report_date",y=["long","short","net"],title=f"{asset} Managed Money / Net"),use_container_width=True)
-            st.plotly_chart(px.line(mm,x="report_date",y="open_interest",title="Open Interest"),use_container_width=True)
+            st.plotly_chart(px.line(mm,x="report_date",y=["long","short","net"],title=f"{asset} Managed Money / Net"), width="stretch")
+            st.plotly_chart(px.line(mm,x="report_date",y="open_interest",title="Open Interest"), width="stretch")
         st.caption("Price↑+OI↑: 新規参加 / Price↑+OI↓: short covering / Price↓+OI↑: 新規short / Price↓+OI↓: liquidation")
         st.warning("ETF holdings/flow は公式構造化データを取得できない場合 Unavailable。holdings changeを実測flowとして表示しません。")
+        asset_etfs = pd.DataFrame([x for x in etfs if x["asset"] == asset])
+        st.subheader("ETF (official sponsor data)")
+        if asset_etfs.empty: st.info("Holdings / shares outstanding / flow: N/A")
+        else: st.dataframe(asset_etfs.groupby("fund").tail(1)[["fund","date","shares_outstanding","ounces","tonnes","nav","flow","flow_status","source"]], hide_index=True, width="stretch")
 with tabs[4]:
     st.header("BTC / Gold / Silver Compare")
     frame=pd.DataFrame(metal_snapshots)
     if frame.empty: st.info("Gold/Silverデータなし")
-    else: st.dataframe(frame[["asset","price","demand_score","top_risk_score","dip_quality_score","phase","confidence","date"]].groupby("asset").tail(1),hide_index=True,use_container_width=True)
+    else: st.dataframe(frame[["asset","price","demand_score","top_risk_score","dip_quality_score","phase","confidence","date"]].groupby("asset").tail(1),hide_index=True,width="stretch")
 with tabs[5]:
     st.header("History")
     frame = pd.DataFrame(snapshots)
     if frame.empty: st.info("履歴なし")
     else:
-        st.plotly_chart(px.line(frame, x="date", y=["cycle_score", "top_risk_score"], title="Cycle / Top Risk"), use_container_width=True)
+        st.plotly_chart(px.line(frame, x="date", y=["cycle_score", "top_risk_score"], title="Cycle / Top Risk"), width="stretch")
         changes = frame[frame.cycle_phase.ne(frame.cycle_phase.shift())][["date", "cycle_phase"]]
-        st.subheader("Phase History"); st.dataframe(changes, hide_index=True, use_container_width=True)
+        st.subheader("Phase History"); st.dataframe(changes, hide_index=True, width="stretch")
 with tabs[6]:
     st.header("System / Data Provenance")
     st.write("モード:", "Glassnode接続" if get_settings().glassnode_api_key else "FREE MODE（Glassnode API未接続）")
-    if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, use_container_width=True)
+    if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Gold / Silver sources")
     st.write("CFTC Public Reporting (official):", "OK" if cot else "UNAVAILABLE")
-    st.write("ETF provider structured feeds:", "UNAVAILABLE（未設定。値は推計しません）")
+    st.write("ETF official sponsor feeds:", "OK" if etfs else "UNAVAILABLE（取得項目を推計しません）")
     st.caption(f"表示時刻: {datetime.now(timezone.utc).isoformat()} · UI cache TTL: {get_settings().cache_ttl_seconds}秒")

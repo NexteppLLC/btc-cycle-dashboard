@@ -7,11 +7,11 @@ import pandas as pd
 import yaml
 
 from collectors.btc_price import BTCPriceCollector
-from collectors.coinmetrics import CoinMetricsCollector
 from collectors.etf_flow import ETFFlowCollector
 from collectors.glassnode import GlassnodeCollector
 from collectors.cftc import CFTCCollector
 from collectors.metals_price import MetalsPriceCollector
+from collectors.metals_etf import MetalsETFCollector
 from config.settings import ROOT, get_settings
 from database.repository import Repository
 from database.session import create_schema, session_scope
@@ -33,7 +33,7 @@ def load_thresholds() -> dict:
 
 def run_update(days: int = 1500) -> dict:
     settings = get_settings(); create_schema(); end = datetime.now(timezone.utc).date(); start = end - timedelta(days=days)
-    collectors = [CoinMetricsCollector(timeout=settings.http_timeout_seconds), BTCPriceCollector(timeout=settings.http_timeout_seconds), GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds), ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
+    collectors = [BTCPriceCollector(timeout=settings.http_timeout_seconds), GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds), ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
     collectors += [MetalsPriceCollector(asset, timeout=settings.http_timeout_seconds) for asset in ("gold", "silver")]
     points = []
     for collector in collectors:
@@ -41,6 +41,11 @@ def run_update(days: int = 1500) -> dict:
         except Exception as exc: logger.error("Collector boundary failure: %s", type(exc).__name__)
     with session_scope() as session:
         repo = Repository(session); repo.upsert_metrics(points); session.flush()
+        try:
+            etf_records = MetalsETFCollector(timeout=settings.http_timeout_seconds).fetch_history(start, end)
+            repo.upsert_etf_holdings(etf_records); session.flush()
+        except Exception as exc:
+            etf_records = []; logger.error("Metals ETF collection failed: %s", type(exc).__name__)
         rows = repo.metrics()
         by_name: dict[str, list] = {}
         for row in rows: by_name.setdefault(row.metric_name, []).append(row)
@@ -85,4 +90,5 @@ def run_update(days: int = 1500) -> dict:
             scores = calculate_metals_scores(values_m, cfg["metals"], asset)
             metal_snapshots.append(repo.upsert_metal_snapshot({"asset": asset.upper(), "date": end, "price": mt.get("price"), "demand_score": scores.demand,
                 "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality, "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
-        return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points), "distribution_coverage": dist_coverage}
+        return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points),
+                "etf_records": len(etf_records), "distribution_coverage": dist_coverage}

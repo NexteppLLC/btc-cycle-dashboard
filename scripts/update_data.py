@@ -8,5 +8,4 @@ from services.update_service import run_update
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     result = run_update(); path = generate_report(result["snapshot"])
-    print(f'Updated {result["points"]} points; report: {path}')
-
+    print(f'Updated {result["points"]} metric points and {result["etf_records"]} ETF records; report: {path}')
