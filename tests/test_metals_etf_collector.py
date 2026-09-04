@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 import httpx
 
 from collectors.metals_etf import MetalsETFCollector
@@ -19,15 +19,36 @@ def test_gld_api_parse_and_column_variant():
     assert rows[0]["tonnes"] == 62.2 and rows[0]["nav"] == 3000
 
 
+def test_gld_realistic_response_parse():
+    content = '''SPDR Gold Shares\nDate,GLD Close,Total Net Asset Value in the Trust,Total Gold in Trust in Ounces,Total Gold in Trust in Tonnes,Shares Outstanding\n04-Sep-26,220.1,"$98,123,456","32,123,456.70","999.12","310,000,000"\n'''
+    rows = collector()._parse("GLD", "GOLD", "official", content, date(2026, 9, 4), date(2026, 9, 4))
+    assert rows[0]["effective_date"] == date(2026, 9, 4)
+    assert rows[0]["physical_holdings"] == 32123456.70 and rows[0]["holdings_unit"] == "OUNCES"
+
+
 def test_iau_csv_parse():
     rows = collector()._parse("IAU", "GOLD", "official", ISHARES.format(ticker="GOLD", name="Gold Trust"), date(2026,9,1), date(2026,9,2))
     assert rows[0]["effective_date"] == date(2026,9,1) and rows[0]["ounces"] == 3000
     assert rows[0]["flow"] is None and rows[0]["flow_status"] == "UNAVAILABLE"
 
 
+def test_iau_realistic_csv_parse():
+    content = '\ufeffiShares Gold Trust\nFund Holdings as of,"September 04, 2026"\nShares Outstanding,"1,234,567"\nTicker,Name,Sector,Asset Class,Market Value,Weight (%),Quantity\nXAU,GOLD,,Commodity,"$7,654,321",100,"15,320.45"\n'
+    rows = collector()._parse("IAU", "GOLD", "official", content, date(2026, 9, 1), date(2026, 9, 5))
+    assert rows[0]["shares_outstanding"] == 1234567
+    assert rows[0]["physical_holdings"] == 15320.45
+
+
 def test_slv_csv_parse():
     rows = collector()._parse("SLV", "SILVER", "official", ISHARES.format(ticker="SLV", name="Silver Trust"), date(2026,9,1), date(2026,9,2))
     assert rows[0]["shares_outstanding"] == 12000 and rows[0]["ounces"] == 3000
+
+
+def test_slv_realistic_csv_parse():
+    content = 'iShares Silver Trust\nHoldings as of,09/04/2026\nShares Outstanding,"500,000,000"\nOunces in Trust,"492,500,000 oz"\nNet Assets of Fund,"$12,345,678"\n'
+    rows = collector()._parse("SLV", "SILVER", "official", content, date(2026, 9, 1), date(2026, 9, 5))
+    assert rows[0]["physical_holdings"] == 492500000
+    assert rows[0]["net_assets"] == 12345678
 
 
 def test_all_provider_records_are_saved(tmp_path):
@@ -41,3 +62,42 @@ def test_all_provider_records_are_saved(tmp_path):
     with session_scope(url) as session:
         saved = Repository(session).etf_holdings()
         assert len(saved) == 3 and {x.fund for x in saved} == {"GLD", "IAU", "SLV"}
+
+
+def test_etf_repository_save(tmp_path):
+    url = f"sqlite:///{tmp_path/'save.db'}"; create_schema(url)
+    record = collector()._parse("GLD", "GOLD", "official", GLD, date(2026, 9, 1), date(2026, 9, 2))[0]
+    with session_scope(url) as session:
+        assert Repository(session).upsert_etf_holdings([record]) == 1
+    with session_scope(url) as session:
+        assert len(Repository(session).etf_holdings("gold")) == 1
+
+
+def test_etf_upsert(tmp_path):
+    url = f"sqlite:///{tmp_path/'upsert.db'}"; create_schema(url)
+    record = collector()._parse("GLD", "GOLD", "official", GLD, date(2026, 9, 1), date(2026, 9, 2))[0]
+    with session_scope(url) as session:
+        repo = Repository(session); repo.upsert_etf_holdings([record]); record["shares_outstanding"] = 99; repo.upsert_etf_holdings([record])
+    with session_scope(url) as session:
+        saved = Repository(session).etf_holdings(); assert len(saved) == 1 and saved[0].shares_outstanding == 99
+
+
+def test_http_200_parse_empty_status():
+    def handler(request): return httpx.Response(200, text="<html>consent page</html>")
+    c = MetalsETFCollector(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    records = c.fetch_history(date(2026, 9, 1), date(2026, 9, 2))
+    assert len(records) == 3 and all(r["status"] == "SCHEMA_UNEXPECTED" for r in records)
+    assert all(x["status"] == "HTTP_OK_SCHEMA_UNEXPECTED" for x in c.diagnostics.values())
+
+
+def test_missing_effective_date():
+    content = 'Shares Outstanding,"12,000"\nOunces in Trust,"3,000"\n'
+    fetched = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    rows = collector()._parse("IAU", "GOLD", "official", content, date(2026, 9, 1), date(2026, 9, 5), fetched)
+    assert rows[0]["effective_date"] is None and rows[0]["date"] == fetched.date()
+
+
+def test_numeric_normalization():
+    from collectors.metals_etf import _num
+    assert [_num(x) for x in ('1,234,567', '$123,456,789', '15,320.45', '492,500,000 oz')] == [1234567, 123456789, 15320.45, 492500000]
+    assert _num('N/A') is None and _num('-') is None and _num('not 12 units') is None

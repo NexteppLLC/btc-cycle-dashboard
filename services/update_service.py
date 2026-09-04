@@ -42,10 +42,16 @@ def run_update(days: int = 1500) -> dict:
     with session_scope() as session:
         repo = Repository(session); repo.upsert_metrics(points); session.flush()
         try:
-            etf_records = MetalsETFCollector(timeout=settings.http_timeout_seconds).fetch_history(start, end)
-            repo.upsert_etf_holdings(etf_records); session.flush()
+            etf_collector = MetalsETFCollector(timeout=settings.http_timeout_seconds)
+            etf_records = etf_collector.fetch_history(start, end)
+            logger.info("ETF normalized objects=%d", len(etf_records))
+            etf_saved = repo.upsert_etf_holdings(etf_records); session.flush()
+            for fund, diagnostic in etf_collector.diagnostics.items():
+                logger.info("%s saved records=%d", fund, sum(r["fund"] == fund and r["status"] == "OK" for r in etf_records))
+            logger.info("ETF repository upserts=%d", etf_saved)
+            etf_saved = sum(r["status"] == "OK" for r in etf_records)
         except Exception as exc:
-            etf_records = []; logger.error("Metals ETF collection failed: %s", type(exc).__name__)
+            etf_records = []; etf_saved = 0; logger.error("Metals ETF collection failed: %s", type(exc).__name__)
         rows = repo.metrics()
         by_name: dict[str, list] = {}
         for row in rows: by_name.setdefault(row.metric_name, []).append(row)
@@ -109,4 +115,4 @@ def run_update(days: int = 1500) -> dict:
             metal_snapshots.append(repo.upsert_metal_snapshot({"asset": asset.upper(), "date": end, "price": mt.get("price"), "demand_score": scores.demand,
                 "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality, "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
         return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points),
-                "etf_records": len(etf_records), "distribution_coverage": dist_coverage}
+                "etf_records": etf_saved, "distribution_coverage": dist_coverage}
