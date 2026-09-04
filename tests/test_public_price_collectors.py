@@ -25,20 +25,20 @@ def test_btc_no_fabricated_value_when_both_fail():
     assert points[0].value is None and points[0].status == MetricStatus.UNAVAILABLE
 
 
-def test_gold_spot_proxy_parsing():
-    csv = "Date,Open,High,Low,Close\n2026-09-01,1,2,1,3500.5\n"
-    points = MetalsPriceCollector("gold", client=client(lambda _: httpx.Response(200, text=csv))).fetch_history(
+def test_gold_yahoo_spot_parsing():
+    payload = {"chart":{"result":[{"timestamp":[1788220800], "indicators":{"quote":[{"close":[3500.5]}]}}], "error":None}}
+    points = MetalsPriceCollector("gold", client=client(lambda _: httpx.Response(200, json=payload))).fetch_history(
         date(2026, 9, 1), date(2026, 9, 1))
     assert points[0].value == 3500.5
-    assert "spot proxy" in points[0].source
+    assert points[0].metadata["price_type"] == "SPOT"
 
 
 def test_silver_yahoo_proxy_fallback_is_explicitly_labelled():
     def handler(request):
-        if "stooq.com" in str(request.url): return httpx.Response(200, text="No data")
+        if "XAGUSD" in str(request.url): return httpx.Response(404)
         return httpx.Response(200, json={"chart":{"result":[{"timestamp":[1788220800],
-            "indicators":{"quote":[{"close":[42.5]}]}}]}})
+            "indicators":{"quote":[{"close":[42.5]}]}}], "error":None}})
     points = MetalsPriceCollector("silver", client=client(handler), retries=1).fetch_history(
         date(2026, 9, 1), date(2026, 9, 1))
     assert points[0].value == 42.5
-    assert "futures proxy" in points[0].source
+    assert points[0].metadata["price_type"] == "FUTURES_PROXY"

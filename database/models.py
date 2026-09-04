@@ -19,6 +19,10 @@ class Metric(Base):
     source: Mapped[str] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(40))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    asset: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    price_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class DailySnapshot(Base):
@@ -87,11 +91,17 @@ class ETFHolding(Base):
     ounces: Mapped[float | None] = mapped_column(Float)
     tonnes: Mapped[float | None] = mapped_column(Float)
     nav: Mapped[float | None] = mapped_column(Float)
+    physical_holdings: Mapped[float | None] = mapped_column(Float, nullable=True)
+    holdings_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    net_assets: Mapped[float | None] = mapped_column(Float, nullable=True)
     flow: Mapped[float | None] = mapped_column(Float)
     flow_status: Mapped[str] = mapped_column(String(40), default="UNAVAILABLE")
     source: Mapped[str] = mapped_column(String(200))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(40), default="OK")
+    effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class MetalsSnapshot(Base):

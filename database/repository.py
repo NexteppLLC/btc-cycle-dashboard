@@ -15,7 +15,11 @@ class Repository:
         for point in points:
             key = {"date": point.timestamp.date(), "metric_name": point.metric_name, "source": point.source}
             row = self.session.scalar(select(Metric).filter_by(**key))
-            values = {**key, "timestamp": point.timestamp, "value": point.value, "status": point.status.value, "fetched_at": point.fetched_at}
+            effective_date = point.metadata.get("effective_date")
+            if isinstance(effective_date, str): effective_date = date.fromisoformat(effective_date)
+            values = {**key, "timestamp": point.timestamp, "value": point.value, "status": point.status.value, "fetched_at": point.fetched_at,
+                      "asset": point.metadata.get("asset"), "price_type": point.metadata.get("price_type"),
+                      "effective_date": effective_date, "error": point.metadata.get("error")}
             if row:
                 for name, value in values.items(): setattr(row, name, value)
             else: self.session.add(Metric(**values))

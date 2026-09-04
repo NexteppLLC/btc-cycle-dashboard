@@ -39,7 +39,7 @@ streamlit run app.py
 |---|---|---|
 | 本当に取得したデータ | BTC/USD daily OHLC close | [Kraken public OHLC](https://docs.kraken.com/api/docs/rest-api/get-ohlc-data/) の `XBTUSD`, interval 1440（primary） |
 | fallback 実測値 | BTC/USD daily close | [Coinbase Exchange public candles](https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductcandles) の `BTC-USD`（300本単位で取得） |
-| spot proxy 実測値 | Gold/Silver USD daily close | Stooq の `XAUUSD` / `XAGUSD` 構造化CSV。DB/UIの source に `USD spot proxy` と明記 |
+| spot/proxy 実測値 | Gold/Silver daily close | Yahoo chart の `XAUUSD=X` / `XAGUSD=X` (SPOT)、`GC=F` / `SI=F` (FUTURES_PROXY)、`GLD` / `SLV` (ETF_PROXY) の順。source と price_type をDB/UIへ保存 |
 | 公式ETF実測値 | GLD / IAU / SLV holdings, shares, NAV（公表ファイルに存在する項目のみ） | [SPDR Gold Shares](https://www.spdrgoldshares.com/usa/historical-data/) / [iShares IAU](https://www.ishares.com/us/products/239561/ishares-gold-trust-fund) / [iShares SLV](https://www.ishares.com/us/products/239855/ishares-silver-trust-fund) のスポンサーCSV |
 | 任意の実測値 | Glassnode 指標 | [Glassnode API](https://docs.glassnode.com/basic-api/api) v1。キーと契約権限がある場合のみ |
 | 任意の実測値 | ETF flow | 管理者が利用条件を確認して指定する構造化 CSV (`date,flow_usd[,fund]`) |

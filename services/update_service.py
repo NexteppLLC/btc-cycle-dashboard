@@ -49,6 +49,7 @@ def run_update(days: int = 1500) -> dict:
         rows = repo.metrics()
         by_name: dict[str, list] = {}
         for row in rows: by_name.setdefault(row.metric_name, []).append(row)
+        for items in by_name.values(): items.sort(key=lambda row: (row.timestamp, row.fetched_at))
         latest = {name: next((r.value for r in reversed(items) if r.value is not None), None) for name, items in by_name.items()}
         price_rows = by_name.get("btc_price_usd", []); prices = pd.Series({r.date: r.value for r in price_rows if r.value is not None}, dtype=float)
         tech = calculate_technicals(prices) if not prices.empty else pd.DataFrame()
@@ -88,7 +89,7 @@ def run_update(days: int = 1500) -> dict:
                         a, b = getattr(current, field), getattr(prior, field)
                         if a is not None and b not in (None, 0): fund_changes.append(a / b - 1); break
             etf_change = sum(fund_changes) / len(fund_changes) if fund_changes else None
-            metal_prices = pd.Series({r.date: r.value for r in by_name.get(f"{asset}_price_usd", []) if r.value is not None}, dtype=float)
+            metal_prices = pd.Series({r.date: r.value for r in by_name.get(f"{asset}_price_usd", []) if r.value is not None}, dtype=float).sort_index()
             mtech = calculate_technicals(metal_prices) if not metal_prices.empty else pd.DataFrame(); mt = mtech.iloc[-1].to_dict() if not mtech.empty else {}
             pchange = float(metal_prices.pct_change().iloc[-1]) if len(metal_prices)>1 else None
             values_m = {"price": mt.get("price"), "open_interest": stats.get("open_interest"), "mm_percentile": stats.get("percentile_52w"), "mm_long_percentile": percentile([x["long"] for x in mm[-52:] if x.get("long") is not None], stats.get("long"), 20) if stats.get("long") is not None else None,
@@ -102,6 +103,7 @@ def run_update(days: int = 1500) -> dict:
                 "above_200dma": (mt.get("price",0)>mt["ma_200"]) if mt.get("ma_200") else None, "drawdown": mt.get("drawdown_ath"),
                 "position_reset": 70 if stats.get("change_13w") is not None and stats["change_13w"]<0 and (stats.get("percentile_52w") or 0)>20 else 40,
                 "oi_reset": 70 if (stats.get("oi_change_1w") or 0)<0 else 40, "reaccumulation": 70 if (stats.get("change_1w") or 0)>0 else 40,
+                "estimated_flow": etf_change is not None,
                 "cot_stale": bool(mm and (end-mm[-1]["report_date"]).days>10)}
             scores = calculate_metals_scores(values_m, cfg["metals"], asset)
             metal_snapshots.append(repo.upsert_metal_snapshot({"asset": asset.upper(), "date": end, "price": mt.get("price"), "demand_score": scores.demand,
