@@ -1,6 +1,7 @@
 """Parse official GLD, IAU and SLV sponsor downloads without fixed offsets."""
 import csv
 import io
+import json
 import logging
 import re
 from datetime import date, datetime, timezone
@@ -44,7 +45,7 @@ def _num(value):
 def _date(value):
     value = str(value or "").strip().strip('"')
     value = re.sub(r"^(?:as\s+of|holdings\s+as\s+of)\s+", "", value, flags=re.I)
-    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d", "%b %d, %Y", "%B %d, %Y",
+    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d", "%b %d, %Y", "%B %d, %Y", "%b %d %Y", "%B %d %Y",
                 "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y"):
         try:
             return datetime.strptime(value, fmt).date()
@@ -62,6 +63,28 @@ def _matching(values, aliases):
             if parsed is not None:
                 return parsed
     return None
+
+
+def _pairs(rows):
+    """Return metadata from both ``key,value`` and ``header/value`` CSV blocks."""
+    result = {}
+    for row in rows:
+        cells = [cell.strip() for cell in row]
+        if len(cells) >= 2 and cells[0]:
+            result.setdefault(cells[0], cells[1])
+    # Current iShares downloads contain a conventional field-name row followed
+    # by its values in parts of the preamble.  Do not confuse the holdings table
+    # with metadata: only recognised summary labels are promoted.
+    summary = {"shares outstanding", "net assets", "net assets of fund",
+               "ounces in trust", "tonnes in trust", "fund holdings as of",
+               "holdings as of", "as of"}
+    for header, values in zip(rows, rows[1:]):
+        normalized = [_norm(cell) for cell in header]
+        if len(values) == len(header) and sum(name in summary for name in normalized):
+            for key, value in zip(header, values):
+                if _norm(key) in summary and str(value).strip():
+                    result.setdefault(str(key).strip(), str(value).strip())
+    return result
 
 
 class MetalsETFCollector(HTTPCollector):
@@ -89,6 +112,37 @@ class MetalsETFCollector(HTTPCollector):
                 "fetched_at": fetched, "published_at": None, "status": status,
                 "error": str(error)[:500]}
 
+    @staticmethod
+    def _shape(content):
+        """Build a bounded, non-sensitive schema description for field logs."""
+        try:
+            value = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            rows = list(csv.reader(io.StringIO(content.lstrip("\ufeff").replace("\x00", ""))))
+            keywords = ("shares outstanding", "net assets", "ounces", "tonnes",
+                        "fund holdings", "holdings", "as of")
+            candidates = []
+            for number, row in enumerate(rows[:40], 1):
+                normalized_row = _norm(" ".join(row))
+                # Schema only: values (including dollar amounts and dates) never
+                # enter diagnostics. In key/value rows only the key is a field.
+                possible_headers = row[:1] if len(row) == 2 else row[:6]
+                names = [_norm(cell)[:60] for cell in possible_headers
+                         if re.search(r"[A-Za-z]", str(cell)) and _num(cell) is None and _date(cell) is None]
+                if number <= 5 or any(word in normalized_row for word in keywords):
+                    candidates.append({"line": number, "columns": len(row), "fields": names})
+            return {"type": "CSV", "row_count": len(rows), "candidate_rows": candidates[:15]}
+        items = value if isinstance(value, list) else next(
+            (v for v in value.values() if isinstance(v, list)), []) if isinstance(value, dict) else []
+        top = sorted(map(str, value.keys()))[:30] if isinstance(value, dict) else []
+        keys = lambda item: sorted(map(str, item.keys()))[:30] if isinstance(item, dict) else []
+        all_keys = {_norm(k) for item in items[:100] if isinstance(item, dict) for k in item}
+        return {"type": "JSON", "top_level_keys": top, "row_count": len(items),
+                "first_item_keys": keys(items[0]) if items else [],
+                "last_item_keys": keys(items[-1]) if items else [],
+                "weight_fields": sorted(k for k in all_keys if "weight" in k or "ounce" in k or "tonne" in k),
+                "date_fields": sorted(k for k in all_keys if "date" in k)}
+
     def fetch_history(self, start_date: date, end_date: date) -> list[dict]:
         records = []
         self.diagnostics = {}
@@ -101,7 +155,10 @@ class MetalsETFCollector(HTTPCollector):
                 diag["http_status"] = response.status_code
                 response.raise_for_status()
                 content = self._decode(response)
-                diag["raw_count"] = sum(bool(line.strip()) for line in content.splitlines())
+                shape = self._shape(content)
+                diag["schema"] = shape
+                diag["raw_count"] = shape["row_count"]
+                logger.info("%s response schema=%s", fund, shape)
                 parsed = self._parse(fund, asset, url, content, start_date, end_date, fetched=fetched)
                 diag["parsed_count"] = len(parsed)
                 diag["normalized_count"] = len(parsed)
@@ -115,11 +172,8 @@ class MetalsETFCollector(HTTPCollector):
                                        ("shares outstanding", "fund holdings as of", "total gold in trust", "ounces in trust"))
                     unexpected = is_markup or (diag["raw_count"] > 0 and not known_schema)
                     diag["status"] = "HTTP_OK_SCHEMA_UNEXPECTED" if unexpected else "HTTP_OK_PARSE_EMPTY"
-                    records.append(self._diagnostic_record(fund, asset, url, fetched,
-                                   "SCHEMA_UNEXPECTED" if unexpected else "PARSE_EMPTY",
-                                   f"HTTP 200 but sponsor response yielded no ETF snapshot; raw rows={diag['raw_count']}"))
             except Exception as exc:
-                records.append(self._diagnostic_record(fund, asset, url, fetched, "HTTP_ERROR", type(exc).__name__))
+                diag["error"] = type(exc).__name__
             self.diagnostics[fund] = diag
             logger.info("%s HTTP=%s raw rows=%d parsed rows=%d normalized records=%d status=%s",
                         fund, diag["http_status"], diag["raw_count"], diag["parsed_count"],
@@ -148,6 +202,13 @@ class MetalsETFCollector(HTTPCollector):
 
     def _parse(self, fund, asset, source, content, start_date, end_date, fetched=None):
         fetched = fetched or datetime.now(timezone.utc)
+        try:
+            payload = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            payload = None
+        if payload is not None:
+            record = self._parse_json_summary(fund, asset, source, payload, fetched)
+            return [record] if record else []
         rows = list(csv.reader(io.StringIO(content.lstrip("\ufeff").replace("\x00", ""))))
         result = []
 
@@ -168,7 +229,7 @@ class MetalsETFCollector(HTTPCollector):
             return result
 
         # iShares has metadata before its actual holdings header. Both can move.
-        pairs = {row[0].strip(): row[1].strip() for row in rows if len(row) >= 2 and row[0].strip()}
+        pairs = _pairs(rows)
         asof_value = next((v for k, v in pairs.items() if _norm(k) in
                           ("fund holdings as of", "holdings as of", "as of", "as of date", "effective date")), None)
         day = _date(asof_value)
@@ -198,6 +259,30 @@ class MetalsETFCollector(HTTPCollector):
                     values["net assets"] = market_value
         record = self._record(fund, asset, source, day, fetched, values)
         return [record] if record else []
+
+    def _parse_json_summary(self, fund, asset, source, payload, fetched):
+        """Parse an explicit sponsor summary; deliberately never sum bar rows."""
+        objects = []
+        def visit(value, depth=0):
+            if depth > 4:
+                return
+            if isinstance(value, dict):
+                objects.append(value)
+                for child in value.values():
+                    visit(child, depth + 1)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child, depth + 1)
+        visit(payload)
+        for values in objects:
+            normalized = {_norm(key): value for key, value in values.items()}
+            day_value = next((value for key, value in normalized.items()
+                              if key in ("date", "effective date", "as of", "holdings as of")), None)
+            day = _date(day_value)
+            record = self._record(fund, asset, source, day, fetched, values)
+            if record:
+                return record
+        return None
 
     def fetch_latest(self) -> list[dict]:
         today = datetime.now(timezone.utc).date()

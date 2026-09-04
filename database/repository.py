@@ -70,6 +70,12 @@ class Repository:
     def upsert_etf_holdings(self, records: list[dict]) -> int:
         saved = 0
         for values in records:
+            # HTTP/schema diagnostics are not holdings. Persist only an OK
+            # snapshot with at least one sponsor-measured summary value.
+            if values.get("status") != "OK" or not any(
+                    values.get(field) is not None
+                    for field in ("physical_holdings", "shares_outstanding", "net_assets")):
+                continue
             key = {k: values[k] for k in ("asset", "fund", "date")}
             row = self.session.scalar(select(ETFHolding).filter_by(**key))
             if row:
