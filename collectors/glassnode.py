@@ -19,7 +19,12 @@ class GlassnodeCollector(HTTPCollector):
         "asopr": "indicators/sopr_adjusted",
         "lth_supply": "supply/lth_sum",
         "sth_supply": "supply/sth_sum",
+        "lth_spent_volume": "transactions/transfers_volume_more_155_sum",
+        "sth_spent_volume": "transactions/transfers_volume_less_155_sum",
+        "lth_realized_profit": "indicators/realized_profit_more_155",
+        "lth_realized_loss": "indicators/realized_loss_more_155",
         "cdd": "indicators/cdd",
+        "dormancy": "indicators/average_dormancy",
     }
 
     def __init__(self, api_key: str | None, *args, **kwargs):
@@ -32,9 +37,10 @@ class GlassnodeCollector(HTTPCollector):
         try:
             rows = self._get_json(f"{self.BASE}/{self.ENDPOINTS[metric]}", params={"a": "BTC", "api_key": self.api_key, "i": "24h", "s": int(datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc).timestamp()), "u": int(datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc).timestamp())})
             fetched = datetime.now(timezone.utc)
-            return [MetricPoint(metric_name=metric, timestamp=datetime.fromtimestamp(row["t"], timezone.utc), value=float(row["v"]) if row.get("v") is not None else None, source="Glassnode API v1", fetched_at=fetched, status=MetricStatus.OK if row.get("v") is not None else MetricStatus.MISSING) for row in rows]
+            return [MetricPoint(metric_name=metric, timestamp=datetime.fromtimestamp(row["t"], timezone.utc), value=float(row["v"]) if row.get("v") is not None else None, source="Glassnode API v1", fetched_at=fetched, status=MetricStatus.OK if row.get("v") is not None else MetricStatus.MISSING, metadata={"asset": "BTC"}) for row in rows]
         except Exception as exc:
-            status = MetricStatus.UNAVAILABLE if getattr(getattr(exc, "response", None), "status_code", None) in {401, 403, 404} else MetricStatus.ERROR
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            status = MetricStatus.UNAVAILABLE_PLAN if code in {401, 403} else MetricStatus.UNAVAILABLE if code == 404 else MetricStatus.ERROR
             return [unavailable(metric, "Glassnode", status)]
 
     def fetch_history(self, start_date: date, end_date: date) -> list[MetricPoint]:

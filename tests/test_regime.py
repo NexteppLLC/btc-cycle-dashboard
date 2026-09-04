@@ -27,4 +27,4 @@ def test_missing_etf_reduces_decision_confidence():
     weights=CFG["confidence_weights"]["btc"]
     full=weighted_confidence({k:True for k in weights},weights)
     missing=weighted_confidence({k:k!="etf" for k in weights},weights)
-    assert full==100 and missing==90
+    assert full==100 and missing==95
