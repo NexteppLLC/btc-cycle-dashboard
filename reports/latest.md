@@ -1,0 +1,31 @@
+# 【BTC On-Chain Daily Report】
+
+日付：2026-09-04
+
+- BTC：$79,664
+- Cycle：PARTIAL
+- Cycle Score：64.43 / 100
+- Top Risk：4.91 / 100
+- Confidence：15.0%
+
+## LTH
+- LTH-MVRV：取得不可
+- Distribution：取得不可 / 100
+
+## STH
+- STH-MVRV：取得不可
+
+## ETF
+- 1D：取得不可
+- 7D：取得不可
+
+## 本日の結論
+フェーズは **PARTIAL**。取得不可の値を推計・ゼロ補完していません。Confidenceを併せて解釈してください。
+
+## 警戒ポイント
+- LTH Distribution 60超
+- Top Risk 70超
+- STH-MVRV 1割れ
+- ETF 7日累計マイナス転換
+
+> ※本ツールは分析支援用であり、投資助言ではありません。
