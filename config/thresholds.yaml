@@ -41,7 +41,14 @@ confidence:
   etf_pending_penalty: 8
   history_penalty: 8
   contradiction_penalty: 5
+minimum_data:
+  phase_confidence: 50
+  btc_major_required: 2
+confidence_weights:
+  btc: {price: 0.15, lth_mvrv: 0.20, sth_mvrv: 0.15, lth_distribution: 0.20, mvrv_zscore: 0.10, etf: 0.10, trend: 0.10}
 metals:
+  phase_confidence: 50
+  confidence_weights: {price: 0.20, cftc_mm: 0.25, open_interest: 0.15, etf: 0.20, divergence: 0.10, trend: 0.10}
   gold:
     demand_weights: {mm_trend: 0.25, mm_percentile: 0.15, etf: 0.20, oi_confirmation: 0.15, commercial: 0.10, divergence: 0.10, trend: 0.05}
     risk_weights: {mm_net: 0.18, mm_long: 0.12, ma_distance: 0.15, etf_exhaustion: 0.12, divergence: 0.13, oi_extreme: 0.10, commercial: 0.10, momentum: 0.10}

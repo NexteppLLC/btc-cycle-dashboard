@@ -31,3 +31,14 @@ def test_gold_spot_proxy_parsing():
         date(2026, 9, 1), date(2026, 9, 1))
     assert points[0].value == 3500.5
     assert "spot proxy" in points[0].source
+
+
+def test_silver_yahoo_proxy_fallback_is_explicitly_labelled():
+    def handler(request):
+        if "stooq.com" in str(request.url): return httpx.Response(200, text="No data")
+        return httpx.Response(200, json={"chart":{"result":[{"timestamp":[1788220800],
+            "indicators":{"quote":[{"close":[42.5]}]}}]}})
+    points = MetalsPriceCollector("silver", client=client(handler), retries=1).fetch_history(
+        date(2026, 9, 1), date(2026, 9, 1))
+    assert points[0].value == 42.5
+    assert "futures proxy" in points[0].source

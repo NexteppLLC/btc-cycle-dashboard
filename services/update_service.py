@@ -20,7 +20,7 @@ from indicators.holders import distribution_score
 from indicators.mvrv import calculate_mvrv
 from indicators.technical import calculate_technicals
 from scoring.cycle_score import calculate_cycle_score
-from scoring.regime import calculate_confidence, classify_phase
+from scoring.regime import btc_minimum_data, classify_phase, weighted_confidence
 from scoring.top_risk import calculate_top_risk
 from scoring.metals import calculate_metals_scores, percentile, position_statistics
 
@@ -57,9 +57,14 @@ def run_update(days: int = 1500) -> dict:
         distribution, dist_coverage = distribution_score({"lth_sopr": latest.get("lth_sopr")})
         values = {**latest, "global_mvrv": latest.get("global_mvrv") or calculate_mvrv(latest.get("market_cap_usd"), latest.get("realized_cap_usd")), "lth_distribution": distribution, "etf_flow": flow["7d"], "btc_trend": current_tech.get("return_30d"), "trend_deviation": (current_tech.get("price") / current_tech.get("ma_200") - 1) if current_tech.get("ma_200") else None}
         cfg = load_thresholds(); cycle = calculate_cycle_score(values, cfg["cycle"]); top = calculate_top_risk(values, cfg["top_risk"])
-        phase = classify_phase(cycle.score, top.score, values.get("btc_trend"), distribution, values.get("sth_mvrv"), cfg)
-        glassnode_ok = any(p.source.startswith("Glassnode") and p.value is not None for p in points)
-        confidence = calculate_confidence(coverage=min(cycle.coverage, top.coverage) if top.coverage else cycle.coverage, glassnode=glassnode_ok, etf_current=flow["today"] is not None, history_sufficient=len(prices) >= 200, config=cfg)
+        btc_available = {"price": values.get("btc_price_usd") is not None, "lth_mvrv": values.get("lth_mvrv") is not None,
+            "sth_mvrv": values.get("sth_mvrv") is not None, "lth_distribution": distribution is not None,
+            "mvrv_zscore": values.get("mvrv_zscore") is not None, "etf": flow["today"] is not None,
+            "trend": values.get("btc_trend") is not None}
+        confidence = weighted_confidence(btc_available, cfg["confidence_weights"]["btc"])
+        minimum_met, _ = btc_minimum_data(values)
+        phase = classify_phase(cycle.score, top.score, values.get("btc_trend"), distribution, values.get("sth_mvrv"), cfg,
+            minimum_met=minimum_met, confidence=confidence)
         snapshot = repo.upsert_snapshot({"date": end, "btc_price": latest.get("btc_price_usd"), "global_mvrv": values["global_mvrv"], "mvrv_zscore": latest.get("mvrv_zscore"), "lth_mvrv": latest.get("lth_mvrv"), "sth_mvrv": latest.get("sth_mvrv"), "lth_realized_price": latest.get("lth_realized_price"), "sth_realized_price": latest.get("sth_realized_price"), "lth_sopr": latest.get("lth_sopr"), "sth_sopr": latest.get("sth_sopr"), "lth_spent_volume": latest.get("lth_spent_volume"), "sth_spent_volume": latest.get("sth_spent_volume"), "etf_flow_1d": flow["today"], "etf_flow_7d": flow["7d"], "lth_distribution": distribution, "cycle_score": cycle.score, "top_risk_score": top.score, "cycle_phase": phase, "confidence": confidence})
         repo.replace_scoring_details(end, cycle.details + top.details)
         metal_snapshots = []
@@ -73,17 +78,28 @@ def run_update(days: int = 1500) -> dict:
             mm = [{"report_date": r.report_date, "long": r.long, "short": r.short, "net": r.net, "open_interest": r.open_interest} for r in cot_rows if r.category == "managed_money"]
             producer = [r for r in cot_rows if r.category == "producer_merchant"]
             stats = position_statistics(mm)
+            fund_rows = [r for r in repo.etf_holdings(asset) if any(v is not None for v in (r.ounces, r.tonnes, r.nav, r.shares_outstanding))]
+            fund_changes = []
+            for fund in {r.fund for r in fund_rows}:
+                fr = [r for r in fund_rows if r.fund == fund]
+                if len(fr) > 1:
+                    current, prior = fr[-1], fr[-2]
+                    for field in ("ounces", "tonnes", "nav", "shares_outstanding"):
+                        a, b = getattr(current, field), getattr(prior, field)
+                        if a is not None and b not in (None, 0): fund_changes.append(a / b - 1); break
+            etf_change = sum(fund_changes) / len(fund_changes) if fund_changes else None
             metal_prices = pd.Series({r.date: r.value for r in by_name.get(f"{asset}_price_usd", []) if r.value is not None}, dtype=float)
             mtech = calculate_technicals(metal_prices) if not metal_prices.empty else pd.DataFrame(); mt = mtech.iloc[-1].to_dict() if not mtech.empty else {}
             pchange = float(metal_prices.pct_change().iloc[-1]) if len(metal_prices)>1 else None
-            values_m = {"mm_percentile": stats.get("percentile_52w"), "mm_long_percentile": percentile([x["long"] for x in mm[-52:] if x.get("long") is not None], stats.get("long"), 20) if stats.get("long") is not None else None,
+            values_m = {"price": mt.get("price"), "open_interest": stats.get("open_interest"), "mm_percentile": stats.get("percentile_52w"), "mm_long_percentile": percentile([x["long"] for x in mm[-52:] if x.get("long") is not None], stats.get("long"), 20) if stats.get("long") is not None else None,
                 "mm_change": stats.get("change_1w"), "mm_trend_score": 75 if (stats.get("change_4w") or 0)>0 else 25,
                 "oi_change": stats.get("oi_change_1w"), "oi_percentile": percentile([x["open_interest"] for x in mm[-52:] if x.get("open_interest") is not None], stats.get("open_interest"), 20) if stats.get("open_interest") is not None else None,
                 "oi_score": 75 if pchange is not None and pchange>0 and (stats.get("oi_change_1w") or 0)>0 else 50,
                 "commercial_change": producer[-1].net-producer[-2].net if len(producer)>1 and producer[-1].net is not None and producer[-2].net is not None else None,
                 "commercial_score": 75 if len(producer)>1 and producer[-1].net is not None and producer[-2].net is not None and producer[-1].net>producer[-2].net else 50,
-                "price_change": pchange, "trend_score": 75 if mt.get("ma_200") and mt.get("price",0)>mt["ma_200"] else 25,
-                "above_200dma": bool(mt.get("ma_200") and mt.get("price",0)>mt["ma_200"]), "drawdown": mt.get("drawdown_ath"),
+                "etf_change": etf_change, "etf_score": 75 if etf_change is not None and etf_change > 0 else 25 if etf_change is not None else None,
+                "price_change": pchange, "trend_score": 75 if mt.get("ma_200") and mt.get("price",0)>mt["ma_200"] else (25 if mt.get("ma_200") else None),
+                "above_200dma": (mt.get("price",0)>mt["ma_200"]) if mt.get("ma_200") else None, "drawdown": mt.get("drawdown_ath"),
                 "position_reset": 70 if stats.get("change_13w") is not None and stats["change_13w"]<0 and (stats.get("percentile_52w") or 0)>20 else 40,
                 "oi_reset": 70 if (stats.get("oi_change_1w") or 0)<0 else 40, "reaccumulation": 70 if (stats.get("change_1w") or 0)>0 else 40,
                 "cot_stale": bool(mm and (end-mm[-1]["report_date"]).days>10)}

@@ -1,9 +1,26 @@
 """Multi-signal phase, confidence, warnings and future alert events."""
 
-PHASE_JA = {"BEAR": "弱気相場", "ACCUMULATION": "底値・蓄積", "EARLY_BULL": "上昇初期", "MID_BULL": "上昇中期", "LATE_BULL": "上昇後期", "TOP_RISK": "天井警戒", "DISTRIBUTION": "分配局面", "UNKNOWN": "データ不足"}
+PHASE_JA = {"BEAR": "弱気相場", "ACCUMULATION": "底値・蓄積", "EARLY_BULL": "上昇初期", "MID_BULL": "上昇中期", "LATE_BULL": "上昇後期", "TOP_RISK": "天井警戒", "DISTRIBUTION": "分配局面", "PARTIAL": "判定保留", "UNKNOWN": "データ不足"}
 
 
-def classify_phase(cycle: float | None, top: float | None, trend: float | None, distribution: float | None, sth_mvrv: float | None, cfg: dict) -> str:
+def weighted_confidence(available: dict[str, bool], weights: dict[str, float]) -> float:
+    """Completeness of decision-critical inputs, not a count of API responses."""
+    total = sum(weights.values())
+    return round(100 * sum(weight for name, weight in weights.items() if available.get(name)) / total, 1) if total else 0.0
+
+
+def btc_minimum_data(values: dict) -> tuple[bool, list[str]]:
+    major = ("lth_mvrv", "sth_mvrv", "lth_distribution", "mvrv_zscore")
+    missing = []
+    if values.get("btc_price_usd") is None: missing.append("Price")
+    if values.get("btc_trend") is None: missing.append("Trend")
+    present = sum(values.get(x) is not None for x in major)
+    if present < 2: missing.append(f"On-chain major metrics ({present}/2)")
+    return not missing, missing
+
+
+def classify_phase(cycle: float | None, top: float | None, trend: float | None, distribution: float | None, sth_mvrv: float | None, cfg: dict, *, minimum_met: bool = True, confidence: float = 100) -> str:
+    if not minimum_met or confidence < cfg.get("minimum_data", {}).get("phase_confidence", 50): return "PARTIAL"
     if cycle is None or trend is None: return "UNKNOWN"
     p = cfg["phase"]
     if distribution is not None and distribution >= p["distribution"] and (top or 0) >= p["top_risk"]: return "DISTRIBUTION"
@@ -34,4 +51,3 @@ def detect_alerts(values: dict, config: dict) -> list[str]:
     if values.get("etf_flow_7d") is not None and values["etf_flow_7d"] < w["etf_7d_negative"]: alerts.append("ETF_7D_NEGATIVE")
     if values.get("previous_phase") and values.get("phase") != values["previous_phase"]: alerts.append("CYCLE_PHASE_CHANGE")
     return alerts
-
