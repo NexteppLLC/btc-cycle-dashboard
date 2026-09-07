@@ -10,11 +10,11 @@ from config.settings import get_settings
 from collectors.cftc import scheduled_publication_date
 from database.repository import Repository
 from database.session import create_schema, session_scope
-from scoring.regime import PHASE_JA
 from indicators.holders import sth_state
 from indicators.normalization import change_summary, multi_horizon_stats
 from services.data_quality import current_metric_row, metric_current, metric_series, selected_metric_rows
 from services.health_service import build_diagnostics
+from services.phase_service import phase_status
 from services.report_service import report_text
 
 st.set_page_config(page_title="BTC Market Cycle", page_icon="₿", layout="wide")
@@ -44,11 +44,7 @@ def confidence_label(value):
 
 
 def safe_phase(phase, confidence, day=None, asset="btc"):
-    source_missing = quality["sources"].get(f"{asset.lower()}_price_usd", {}).get("status") != "OK"
-    if asset.lower() != "btc":
-        source_missing = source_missing or quality["sources"].get(f"{asset.lower()}_cot", {}).get("status") != "OK"
-    stale = day is not None and (datetime.now(timezone.utc).date() - day).days > 3
-    return "判定保留 / PARTIAL" if stale or source_missing or confidence is None or confidence < 50 or phase in ("PARTIAL", "UNKNOWN") else f"{phase} / {PHASE_JA.get(phase, phase)}"
+    return phase_status(phase, confidence, day, asset, diagnostics=quality).label
 
 
 def metric_grid(items, columns=4):
@@ -114,11 +110,11 @@ with tabs[0]:
         cols = st.columns(4)
         cols[0].metric("Bitcoin", "取得不可" if latest["btc_price"] is None else f'${latest["btc_price"]:,.0f}')
         cols[1].metric("現在", safe_phase(latest["cycle_phase"], latest["confidence"], latest["date"]))
-        reference = " 参考値" if latest["confidence"] < 50 else ""
+        reference = " 参考値" if phase_status(latest["cycle_phase"], latest["confidence"], latest["date"], diagnostics=quality).partial else ""
         cols[2].metric("Cycle Score", f'{shown(latest["cycle_score"])} / 100{reference}')
         cols[3].metric("Top Risk", f'{shown(latest["top_risk_score"])} / 100{reference}')
         st.metric("Confidence（主要データ充足度）", f'{shown(latest["confidence"])}% · {confidence_label(latest["confidence"])}')
-        if latest["confidence"] < 50: st.error("判定保留：オンチェーン主要指標など、正式判定に必要なデータが不足しています。")
+        if reference: st.error("判定保留：オンチェーン主要指標など、正式判定に必要な現在のデータが不足しています。")
         st.subheader("今日の重要変化")
         previous = snapshots[-2] if len(snapshots) > 1 else None
         if previous and previous["cycle_phase"] != latest["cycle_phase"]: st.warning(f'{previous["cycle_phase"]} → {latest["cycle_phase"]}')
@@ -134,6 +130,22 @@ with tabs[0]:
 
 metric_df = pd.DataFrame(metrics)
 with tabs[1]:
+    st.subheader("BTCデータの取得状況")
+    btc_eligibility = quality["phase_eligibility"]["btc"]
+    st.caption(f"現在のデータ充足度：{shown(btc_eligibility['confidence'])}% · "
+               f"LTH分配スコアの構成データ：{shown(100 * btc_eligibility['distribution_coverage'])}%")
+    with st.expander("取得できない指標と対応方法", expanded=bool(btc_eligibility["missing"])):
+        names = {"lth_mvrv": "LTH-MVRV", "sth_mvrv": "STH-MVRV", "mvrv_zscore": "MVRV Z-Score",
+                 "lth_sopr": "LTH-SOPR", "sth_sopr": "STH-SOPR", "etf_flow_usd": "BTC ETF資金フロー"}
+        st.dataframe(pd.DataFrame([{"指標": label, "状態": quality["sources"][name]["status"],
+                                    "観測日": quality["sources"][name].get("effective_date"),
+                                    "取得元": quality["sources"][name].get("source"),
+                                    "理由": quality["sources"][name].get("reason") or "取得済み"}
+                                   for name, label in names.items()]), hide_index=True, width="stretch")
+        st.markdown("LTH/STH指標は、対応する契約の **GLASSNODE_API_KEY** を設定したうえで「データを取得・更新」を押してください。"
+                    "キーがある場合も、認証と各指標の利用権限を個別に確認します。")
+        st.markdown("BTC ETFは **ETF_FLOW_CSV_URL** に `date,flow_usd` のCSV取得先を設定します。"
+                    "`flow_usd` はUSD単位、流出は負数です。取得先が未設定の間は判定材料に含めません。")
     btc_prices = pd.DataFrame(selected_metric_rows(metrics, "btc_price_usd"))
     if not btc_prices.empty:
         series = metric_series(metrics, "btc_price_usd")
@@ -149,9 +161,10 @@ with tabs[1]:
         st.caption(f"Price source: {btc_prices.iloc[-1].source} · 最終観測日: {btc_prices.iloc[-1].date} · 日足終値")
     st.header("MVRV / Cost Basis")
     if latest:
-        hero = (("LTH-MVRV", latest["lth_mvrv"]), ("STH-MVRV", latest["sth_mvrv"]),
-                ("LTH Distribution", latest["lth_distribution"]), ("MVRV Z-Score", latest["mvrv_zscore"]),
-                ("Cycle Score", latest["cycle_score"]), ("Top Risk", latest["top_risk_score"]),
+        reference = "（参考値）" if phase_status(latest["cycle_phase"], latest["confidence"], latest["date"], diagnostics=quality).partial else ""
+        hero = (("LTH-MVRV", metric_current(metrics, "lth_mvrv")), ("STH-MVRV", metric_current(metrics, "sth_mvrv")),
+                ("LTH Distribution", btc_eligibility["distribution_value"]), ("MVRV Z-Score", metric_current(metrics, "mvrv_zscore")),
+                (f"Cycle Score{reference}", latest["cycle_score"]), (f"Top Risk{reference}", latest["top_risk_score"]),
                 ("Phase", safe_phase(latest["cycle_phase"], latest["confidence"], latest["date"])),
                 ("Confidence", f'{shown(latest["confidence"])}%'))
         metric_grid(hero)
@@ -190,10 +203,12 @@ with tabs[1]:
     if latest:
         state = sth_state({name: metric_current(metrics, name) for name in ("btc_price_usd", "sth_mvrv", "sth_sopr", "sth_realized_price")})
         st.write("**STH state:**", state or "N/A")
-        missing = [label for label,key in (("LTH-MVRV","lth_mvrv"),("STH-MVRV","sth_mvrv"),("MVRV Z","mvrv_zscore"),("LTH Distribution","lth_distribution")) if latest.get(key) is None]
+        current_holders = {name: metric_current(metrics, name) for name in ("lth_mvrv", "sth_mvrv", "mvrv_zscore")}
+        current_holders["lth_distribution"] = btc_eligibility["distribution_value"]
+        missing = [label for label,key in (("LTH-MVRV","lth_mvrv"),("STH-MVRV","sth_mvrv"),("MVRV Z","mvrv_zscore"),("LTH Distribution","lth_distribution")) if current_holders.get(key) is None]
         text = f"現在のフェーズは{safe_phase(latest['cycle_phase'], latest['confidence'], latest['date'])}。"
-        if (datetime.now(timezone.utc).date() - latest["date"]).days <= 3 and latest["lth_distribution"] is not None: text += f"長期保有者の分配スコアは{latest['lth_distribution']:.1f}。"
-        if metric_current(metrics, "sth_mvrv") is not None and latest["sth_mvrv"] is not None: text += "短期保有者は平均的に含み益。" if latest["sth_mvrv"] >= 1 else "短期保有者は平均的に含み損。"
+        if btc_eligibility["distribution_value"] is not None: text += f"長期保有者の分配スコアは{btc_eligibility['distribution_value']:.1f}。"
+        if current_holders["sth_mvrv"] is not None: text += "短期保有者は平均的に含み益。" if current_holders["sth_mvrv"] >= 1 else "短期保有者は平均的に含み損。"
         if missing: text += " 欠損: " + "、".join(missing) + "。欠損値は推定していません。"
         st.info("**Daily Interpretation:** " + text)
     st.caption("LTH = Long-Term Holder / STH = Short-Term Holder。Glassnode利用時は公式の155日分類を変更しません。")
@@ -203,7 +218,8 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
         rows=[x for x in metal_snapshots if x["asset"]==asset]; m=rows[-1] if rows else None
         if not m: st.info("取得済みデータなし / Unavailable")
         else:
-            labels=(("Price",m["price"]),("Institutional Demand (参考値)" if m["confidence"]<50 else "Institutional Demand",m["demand_score"]),("Top Risk (参考値)" if m["confidence"]<50 else "Top Risk",m["top_risk_score"]),("Dip Quality",m["dip_quality_score"]),("Phase",safe_phase(m["phase"],m["confidence"],m["date"],m["asset"])),("Confidence",f'{shown(m["confidence"])}% · {confidence_label(m["confidence"])}'))
+            partial = phase_status(m["phase"], m["confidence"], m["date"], m["asset"], diagnostics=quality).partial
+            labels=(("Price",m["price"]),("Institutional Demand (参考値)" if partial else "Institutional Demand",m["demand_score"]),("Top Risk (参考値)" if partial else "Top Risk",m["top_risk_score"]),("Dip Quality (参考値)" if partial else "Dip Quality",m["dip_quality_score"]),("Phase",safe_phase(m["phase"],m["confidence"],m["date"],m["asset"])),("Confidence",f'{shown(m["confidence"])}% · {confidence_label(m["confidence"])}'))
             for col,(label,value) in zip(st.columns(6),labels): col.metric(label, shown(value) if isinstance(value,(int,float)) else value)
             if m["price"] is None: st.warning("Dip Quality: N/A — Price unavailable。CFTCが取得済みでも価格不足のため正式判定を保留します。")
         price_rows = pd.DataFrame(selected_metric_rows(metrics, f"{asset.lower()}_price_usd"))

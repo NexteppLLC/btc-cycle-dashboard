@@ -73,7 +73,14 @@ class CoinMetricsCollector(HTTPCollector):
                                 status = MetricStatus.ERROR
                                 metadata["error"] = "Invalid numeric observation"
                         else:
-                            metadata["error"] = "Metric not returned by provider"
+                            # A daily field for the still-open UTC day is not an
+                            # observed historical gap. Keep a dated diagnostic
+                            # without hiding the last published daily value.
+                            if timestamp.date() == fetched.date():
+                                status = MetricStatus.PENDING
+                                metadata["error"] = "Current UTC day observation not yet published"
+                            else:
+                                metadata["error"] = "Metric not returned by provider"
                         point = MetricPoint(metric_name=name, timestamp=timestamp,
                             value=value, source=self.SOURCE, fetched_at=fetched,
                             status=status, metadata=metadata)
