@@ -1,6 +1,7 @@
 # BTC / Gold / Silver 日次レポート
 
 保存済み集計日（UTC）：2026-09-07
+判定確認日（UTC）：2026-09-07
 
 ## Bitcoin
 - BTC：80,334 USD
@@ -14,7 +15,7 @@
 - STH-MVRV：取得不可
 - LTH Distribution：取得不可 / 100
 - ETF 最新観測フロー：取得不可
-- ETF 直近7暦日合計：取得不可
+- ETF 最新観測日を含む7暦日合計：取得不可
 
 ## 本日の解釈
 主要指標が不足しているため、BTCのサイクル判定を保留します。表示スコアは利用可能なデータのみの参考値です。低いTop Riskを安全の根拠として扱いません。
@@ -39,12 +40,25 @@
 - Confidence：80.0%
 
 ## データの状態
-更新結果：取得正常
+更新結果：一部取得不可
 
 - btc_price_usd：OK · Kraken Spot XBT/USD daily OHLC / SPOT / 2026-09-06
 - gold_price_usd：OK · Yahoo Finance GC=F / FUTURES_PROXY / 2026-09-06
 - silver_price_usd：OK · Yahoo Finance SI=F / FUTURES_PROXY / 2026-09-06
 - global_mvrv：OK
+- lth_mvrv：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- sth_mvrv：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- mvrv_zscore：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- lth_realized_price：UNAVAILABLE_NO_API_KEY · CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV availability
+- sth_realized_price：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- lth_sopr：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- sth_sopr：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- lth_supply：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- sth_supply：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- lth_spent_volume：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- lth_realized_profit：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- cdd：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
+- etf_flow_usd：PENDING · Operator-configured ETF CSV
 - gold_cot：OK
 - silver_cot：OK
 - GLD：OK · 2026-09-04
