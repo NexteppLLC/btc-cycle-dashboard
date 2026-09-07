@@ -331,11 +331,13 @@ class MetalsETFCollector(HTTPCollector):
 
     def _record(self, fund, asset, source, day, fetched, values):
         shares = _matching(values, ("shares outstanding", "total shares outstanding", "shares outstanding as of", "shares outstanding end of day"), "COUNT")
-        ounces = _matching(values, ("total gold in trust in ounces", "total silver in trust in ounces",
+        ounces = _matching(values, ("total ounces of gold in the trust", "total ounces of silver in the trust",
+                           "total gold in trust in ounces", "total silver in trust in ounces",
                            "total gold in trust (ounces)", "total silver in trust (ounces)",
                            "total net asset value ounces in the trust",
                            "total ounces", "ounces in trust", "ounces", "fine ounces"), "OUNCES")
-        tonnes = _matching(values, ("total gold in trust in tonnes", "total silver in trust in tonnes",
+        tonnes = _matching(values, ("tonnes of gold", "tonnes of silver",
+                           "total gold in trust in tonnes", "total silver in trust in tonnes",
                            "total gold in trust (tonnes)", "total silver in trust (tonnes)",
                            "total net asset value tonnes in the trust",
                            "tonnes in trust", "tonnes", "metric tonnes"), "TONNES")

@@ -330,3 +330,19 @@ def test_parse_diagnostic_reports_physical_field_coverage():
     coverage = c.diagnostics["GLD"]["field_counts"]
     assert coverage["physical_holdings"] == 1 and coverage["tonnes"] == 1
     assert coverage["ounces"] == 0 and coverage["shares_outstanding"] == 0
+
+
+def test_current_spdr_archive_headers_observed_in_production():
+    # Exact worksheet 2 header schema from the official workbook's live update.
+    content = ('Date,Closing Price,Ounces of Gold Per Share,NAV/share at 10.30am NYT,'
+               'Indicative Price per Share at 4.15pm NYT,Mid point of bid ask spread at 4.15pm NYT,'
+               'Premium discount of GLD mid point vs indicative value of GLD at 4.15pm NYT,'
+               'Daily Share Volume,Total Ounces of Gold in the Trust,Tonnes of Gold,Total Net Asset Value in the Trust\n'
+               '2026-09-04,400,0.09,400,400,400,0,1000000,30000000,933.1,130000000000\n')
+    rows = collector()._parse("GLD", "GOLD", "official", content, date(2026, 9, 1), date(2026, 9, 7))
+    assert len(rows) == 1
+    assert rows[0]["physical_holdings"] == 30000000
+    assert rows[0]["ounces"] == 30000000
+    assert rows[0]["tonnes"] == 933.1
+    assert rows[0]["shares_outstanding"] is None
+    assert rows[0]["net_assets"] == 130000000000
