@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import date, datetime, timezone
 
 from config.settings import ROOT
-from scoring.regime import PHASE_JA
+from services.phase_service import phase_status
 
 
 def fmt(value, suffix="", digits=2):
@@ -13,14 +13,15 @@ def fmt(value, suffix="", digits=2):
 
 def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
     as_of = date.fromisoformat(diagnostics["as_of"]) if diagnostics else datetime.now(timezone.utc).date()
-    stale = (as_of - snapshot.date).days > 3
-    price_missing = diagnostics and diagnostics["sources"].get("btc_price_usd", {}).get("status") != "OK"
-    partial = stale or price_missing or snapshot.cycle_phase in ("PARTIAL", "UNKNOWN") or snapshot.confidence < 50
+    status = phase_status(snapshot.cycle_phase, snapshot.confidence, snapshot.date,
+                          diagnostics=diagnostics, as_of=as_of)
+    stale, partial = status.stale, status.partial
     reference = "（参考値）" if partial else ""
-    phase = "判定保留 / PARTIAL" if partial else f"{snapshot.cycle_phase} / {PHASE_JA.get(snapshot.cycle_phase, snapshot.cycle_phase)}"
+    phase = status.label
     text = f"""# BTC / Gold / Silver 日次レポート
 
 保存済み集計日（UTC）：{snapshot.date.isoformat()}
+判定確認日（UTC）：{as_of.isoformat()}
 
 ## Bitcoin
 - BTC：{fmt(snapshot.btc_price, ' USD', 0)}
@@ -34,7 +35,7 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
 - STH-MVRV：{fmt(snapshot.sth_mvrv)}
 - LTH Distribution：{fmt(snapshot.lth_distribution)} / 100
 - ETF 最新観測フロー：{fmt(snapshot.etf_flow_1d, ' USD')}
-- ETF 直近7暦日合計：{fmt(snapshot.etf_flow_7d, ' USD')}
+- ETF 最新観測日を含む7暦日合計：{fmt(snapshot.etf_flow_7d, ' USD')}
 
 ## 本日の解釈
 """
@@ -47,13 +48,14 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
     text += "取得不可の指標は推測・ゼロ補完しません。LTH/STHなどの契約制限は、無料モードでは取得不可として明示します。\n"
     for m in metals:
         text += f"\n## {m.asset.title()}\n"
-        price_missing = diagnostics and diagnostics["sources"].get(f"{m.asset.lower()}_price_usd", {}).get("status") != "OK"
-        hold = (as_of - m.date).days > 3 or price_missing or m.phase in ("PARTIAL", "UNKNOWN") or m.confidence < 50
-        mphase = "判定保留 / PARTIAL" if hold else f"{m.phase} / {PHASE_JA.get(m.phase, m.phase)}"
+        metal_status = phase_status(m.phase, m.confidence, m.date, m.asset,
+                                    diagnostics=diagnostics, as_of=as_of)
+        hold, mphase = metal_status.partial, metal_status.label
+        mreference = "（参考値）" if hold else ""
         text += f"- 保存済み集計日（UTC）：{m.date.isoformat()}\n"
         text += f"- 価格：{fmt(m.price, ' USD')}（現物・先物・ETF代理値の区別はソース参照）\n"
-        text += f"- フェーズ：{mphase}\n- Institutional Demand：{fmt(m.demand_score)} / 100\n"
-        text += f"- Top Risk：{fmt(m.top_risk_score)} / 100\n- Dip Quality：{fmt(m.dip_quality_score)} / 100\n"
+        text += f"- フェーズ：{mphase}\n- Institutional Demand{mreference}：{fmt(m.demand_score)} / 100\n"
+        text += f"- Top Risk{mreference}：{fmt(m.top_risk_score)} / 100\n- Dip Quality{mreference}：{fmt(m.dip_quality_score)} / 100\n"
         text += f"- Confidence：{fmt(m.confidence, '%', 1)}\n"
         if hold:
             text += "- 主要データ不足のため、表示スコアは参考値です。\n"

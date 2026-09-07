@@ -4,14 +4,19 @@ from indicators.normalization import finite_number
 PHASE_JA = {"BEAR": "弱気相場", "ACCUMULATION": "底値・蓄積", "EARLY_BULL": "上昇初期", "MID_BULL": "上昇中期", "LATE_BULL": "上昇後期", "TOP_RISK": "天井警戒", "DISTRIBUTION": "分配局面", "PARTIAL": "判定保留", "UNKNOWN": "データ不足"}
 
 
-def weighted_confidence(available: dict[str, bool], weights: dict[str, float]) -> float:
-    """Completeness of decision-critical inputs, not a count of API responses."""
+def weighted_confidence(available: dict[str, bool | float], weights: dict[str, float]) -> float:
+    """Completeness of inputs, including fractional coverage of composites."""
     valid_weights = {name: weight for name, raw in weights.items()
                      if (weight := finite_number(raw)) is not None and weight > 0}
     total = sum(valid_weights.values())
     if not total or finite_number(total) is None:
         return 0.0
-    score = sum(weight / total for name, weight in valid_weights.items() if available.get(name))
+    score = 0.0
+    for name, weight in valid_weights.items():
+        raw = available.get(name)
+        coverage = float(raw) if isinstance(raw, bool) else finite_number(raw)
+        if coverage is not None:
+            score += weight / total * min(1.0, max(0.0, coverage))
     return round(min(100.0, max(0.0, 100 * score)), 1)
 
 

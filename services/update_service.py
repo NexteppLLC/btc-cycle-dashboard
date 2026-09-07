@@ -86,6 +86,25 @@ def build_btc_inputs(rows, end):
     return values, flow, coverage
 
 
+def btc_input_eligibility(values, flow, distribution_coverage, cfg):
+    """Use the same current input completeness for persistence and display."""
+    available = {"price": values.get("btc_price_usd") is not None,
+                 "global_mvrv": values.get("global_mvrv") is not None,
+                 "lth_mvrv": values.get("lth_mvrv") is not None,
+                 "sth_mvrv": values.get("sth_mvrv") is not None,
+                 "lth_distribution": distribution_coverage if values.get("lth_distribution") is not None else 0.0,
+                 "mvrv_zscore": values.get("mvrv_zscore") is not None,
+                 "etf": flow["7d"] is not None,
+                 "sopr": any(values.get(k) is not None for k in ("lth_sopr", "sth_sopr", "asopr")),
+                 "trend": values.get("btc_trend") is not None}
+    confidence = weighted_confidence(available, cfg["confidence_weights"]["btc"])
+    minimum_met, missing = btc_minimum_data(values)
+    return {"minimum_met": minimum_met, "confidence": confidence,
+            "missing": missing, "distribution_coverage": distribution_coverage,
+            "distribution_value": values.get("lth_distribution"),
+            "minimum_confidence": cfg.get("minimum_data", {}).get("phase_confidence", 50)}
+
+
 def _sign_score(value, positive=75, negative=25, neutral=50):
     value = finite_number(value)
     return None if value is None else positive if value > 0 else negative if value < 0 else neutral
@@ -207,13 +226,8 @@ def run_update(days: int = 1500) -> dict:
         cfg = load_thresholds()
         cycle = calculate_cycle_score(values, cfg["cycle"])
         top = calculate_top_risk(values, cfg["top_risk"])
-        btc_available = {"price": values.get("btc_price_usd") is not None, "global_mvrv": values.get("global_mvrv") is not None,
-                         "lth_mvrv": values.get("lth_mvrv") is not None, "sth_mvrv": values.get("sth_mvrv") is not None,
-                         "lth_distribution": values.get("lth_distribution") is not None, "mvrv_zscore": values.get("mvrv_zscore") is not None,
-                         "etf": flow["today"] is not None, "sopr": any(values.get(k) is not None for k in ("lth_sopr", "sth_sopr", "asopr")),
-                         "trend": values.get("btc_trend") is not None}
-        confidence = weighted_confidence(btc_available, cfg["confidence_weights"]["btc"])
-        minimum_met, _ = btc_minimum_data(values)
+        eligibility = btc_input_eligibility(values, flow, dist_coverage, cfg)
+        confidence, minimum_met = eligibility["confidence"], eligibility["minimum_met"]
         phase = classify_phase(cycle.score, top.score, values.get("btc_trend"), values.get("lth_distribution"),
                                values.get("sth_mvrv"), cfg, minimum_met=minimum_met, confidence=confidence)
         snapshot_values = {name: values.get(name) for name in ("global_mvrv", "mvrv_zscore", "lth_mvrv", "sth_mvrv",
