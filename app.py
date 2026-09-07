@@ -169,7 +169,8 @@ with tabs[1]:
                 summary = dict.fromkeys(summary)
                 stats = dict.fromkeys(stats)
             col.metric(name, shown(metric_current(metrics, name)), delta=f'1D {shown(summary["daily_change"], ".3f")} / 7D {shown(summary["change_7d"], ".3f")}')
-            col.caption(f'{row.source} · {row.status} · {row.fetched_at} · 52W pct {shown(stats["percentile_52w"], ".2f")}')
+            freshness = "OK" if current_metric_row(metrics, name) is not None else "STALE / 取得不可"
+            col.caption(f'{row.source} · {freshness} · 観測日 {row.date} · 取得 {row.fetched_at} · 52W pct {shown(stats["percentile_52w"], ".2f")}')
     period = st.selectbox("Realized Price Zones期間", ["90D", "1Y", "2Y", "4Y", "ALL"], index=1)
     period_days = {"90D":90, "1Y":365, "2Y":730, "4Y":1461, "ALL":None}[period]
     cost_names = {"btc_price_usd":"BTC Price", "realized_price":"Global Realized Price",
@@ -243,7 +244,7 @@ for tab, asset in ((tabs[2], "GOLD"), (tabs[3], "SILVER")):
             if not asset_cot: missing.extend(["CFTC Managed Money", "Open Interest"])
             st.caption("不足データ / Missing: " + (", ".join(missing) if missing else "なし。スコアは実測入力のみ。"))
         expected_funds = {"GOLD": {"GLD", "IAU"}, "SILVER": {"SLV"}}[asset]
-        available_funds = set(asset_etfs.fund) if not asset_etfs.empty else set()
+        available_funds = {fund for fund in expected_funds if quality["sources"][fund]["status"] == "OK"}
         etf_status = "OK" if available_funds == expected_funds else "PARTIAL" if available_funds else "N/A"
         st.markdown(f"**ETF Data:** {', '.join(sorted(available_funds)) or 'N/A'}　 **ETF Status:** {etf_status}")
         st.subheader("ETF (official sponsor data)")
@@ -282,7 +283,7 @@ with tabs[6]:
     if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Gold / Silver sources")
     st.write("CFTC Public Reporting (official):", "OK" if all(quality["sources"][f"{a}_cot"]["status"] == "OK" for a in ("gold", "silver")) else "PARTIAL / STALE")
-    st.write("ETF official sponsor feeds:", "OK" if len(latest_fund_rows(fresh_only=True)) == 3 else "PARTIAL / UNAVAILABLE")
+    st.write("ETF official sponsor feeds:", "OK" if all(quality["sources"][fund]["status"] == "OK" for fund in ("GLD", "IAU", "SLV")) else "PARTIAL / UNAVAILABLE")
     if etfs:
         st.dataframe(pd.DataFrame(etfs)[["fund","asset","source","status","effective_date","fetched_at","error"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Data Status / Freshness SLA")

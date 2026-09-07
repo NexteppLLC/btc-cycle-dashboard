@@ -52,3 +52,18 @@ def test_old_high_confidence_report_does_not_claim_current_market_phase():
     assert "判定保留 / PARTIAL" in text
     assert "期限切れ" in text
     assert "BTCの現在フェーズはMID_BULL" not in text
+
+
+def test_etf_nav_alone_is_partial_not_healthy_holdings():
+    row = dict(fund="GLD", status="OK", effective_date=TODAY, net_assets=100_000_000)
+    result = build_diagnostics([], [], [row], as_of=TODAY)
+    assert result["sources"]["GLD"]["status"] == "PARTIAL_FIELDS"
+    assert any("physical holdings/shares are missing" in w for w in result["warnings"])
+
+
+def test_newer_missing_cot_report_does_not_resurrect_older_ok_status():
+    base = dict(asset="GOLD", category="managed_money", long=100, short=50, open_interest=300)
+    cot = [{**base, "report_date": TODAY-timedelta(days=8), "status": "OK"},
+           {**base, "report_date": TODAY-timedelta(days=1), "status": "MISSING"}]
+    result = build_diagnostics([], cot, [], as_of=TODAY)
+    assert result["sources"]["gold_cot"]["status"] == "UNAVAILABLE_OR_STALE"

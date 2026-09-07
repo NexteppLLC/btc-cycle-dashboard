@@ -279,3 +279,54 @@ def test_html_preserves_separate_currency_and_unit_tokens():
     content = '<html><body><h1>iShares Gold Trust</h1><div><span>Net Assets of Fund</span><span>€</span><span>4000</span><span>as of Sep 04, 2026</span></div><div><span>Ounces in Trust</span><span>3</span><span>tonnes</span><span>as of Sep 04, 2026</span></div></body></html>'
     assert collector()._parse("IAU", "GOLD", "official", content,
                               date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_gld_parenthesized_holdings_units_are_physical_totals():
+    content = '''Date,GLD Close,Ounces of Gold Per Share,Total Gold in Trust (Tonnes),Total Gold in Trust (Ounces),Total Net Asset Value in the Trust
+04-Sep-2026,406.77,0.09,1000.25,32158784.1866,149293331231.18
+'''
+    record = collector()._parse("GLD", "GOLD", "official", content,
+                                 date(2026, 9, 4), date(2026, 9, 4))[0]
+    assert record["tonnes"] == 1000.25
+    assert record["ounces"] == 32158784.1866
+    assert record["physical_holdings"] == 32158784.1866 and record["holdings_unit"] == "OUNCES"
+    assert record["net_assets"] == 149293331231.18
+    assert record["shares_outstanding"] is None
+
+
+def test_gld_physical_only_table_header_is_recognized():
+    content = 'Date,Total Gold in Trust (Tonnes)\n04-Sep-2026,1000.25\n'
+    record = collector()._parse("GLD", "GOLD", "official", content,
+                                 date(2026, 9, 4), date(2026, 9, 4))[0]
+    assert record["physical_holdings"] == 1000.25 and record["holdings_unit"] == "TONNES"
+    assert record["net_assets"] is None and record["ounces"] is None
+
+
+def test_gld_legacy_sponsor_labels_keep_weight_units_separate_from_assets():
+    content = 'Date,Total Net Asset Value Ounces in the Trust,Total Net Asset Value Tonnes in the Trust,Total Net Asset Value in the Trust\n04-Sep-2026,32000000,995.3,140000000000\n'
+    record = collector()._parse("GLD", "GOLD", "official", content,
+                                 date(2026, 9, 4), date(2026, 9, 4))[0]
+    assert record["ounces"] == 32000000 and record["tonnes"] == 995.3
+    assert record["net_assets"] == 140000000000
+
+
+def test_schema_diagnostic_finds_late_worksheet_header_and_columns():
+    content = ('Legal preamble\n' * 55 + '__SPONSOR_WORKSHEET_BOUNDARY__\n'
+               'Date,Close,NAV per Share,Price,Bid,Ask,Volume,Total Gold in Trust (Tonnes),Total Gold in Trust (Ounces),Total Net Asset Value in the Trust\n'
+               '04-Sep-2026,406.77,407,405,406,407,500,1000.25,32158784.1866,149293331231.18\n')
+    shape = collector()._shape(content)
+    assert shape["table_headers"][0]["worksheet"] == 2
+    assert shape["table_headers"][0]["line"] == 57
+    assert "total gold in trust tonnes" in shape["table_headers"][0]["fields"]
+    assert "total gold in trust ounces" in shape["table_headers"][0]["fields"]
+    assert "149293331231" not in str(shape) and "32158784" not in str(shape)
+
+
+def test_parse_diagnostic_reports_physical_field_coverage():
+    content = 'Date,Total Gold in Trust (Tonnes),Total Net Asset Value in the Trust\n04-Sep-2026,1000.25,149293331231.18\n'
+    c = MetalsETFCollector(client=httpx.Client(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, text=content))))
+    c.fetch_history(date(2026, 9, 4), date(2026, 9, 4))
+    coverage = c.diagnostics["GLD"]["field_counts"]
+    assert coverage["physical_holdings"] == 1 and coverage["tonnes"] == 1
+    assert coverage["ounces"] == 0 and coverage["shares_outstanding"] == 0
