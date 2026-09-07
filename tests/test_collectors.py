@@ -24,10 +24,12 @@ def test_glassnode_without_key():
     assert all(p.status == MetricStatus.UNAVAILABLE_NO_API_KEY and p.value is None for p in GlassnodeCollector(None).fetch_latest())
 
 def test_global_mvrv_calculation():
-    payload={"data":[{"time":"2026-01-01T00:00:00Z","CapMrktCurUSD":"900","CapRealUSD":"300","SplyCur":"10"}]}
+    payload={"data":[{"time":"2026-01-01T00:00:00Z","CapMrktCurUSD":"900","CapMVRVCur":"3","SplyCur":"10"}]}
     points=OnChainCollector(client=client(lambda r: httpx.Response(200,json=payload))).fetch_history(date(2026,1,1),date(2026,1,1))
     mvrv=next(p for p in points if p.metric_name=="global_mvrv")
-    assert mvrv.value==3 and mvrv.source=="CALCULATED_FROM_MARKET_CAP_REALIZED_CAP"
+    assert mvrv.value==3 and mvrv.source=="Coin Metrics Community API v4"
+    assert next(p for p in points if p.metric_name=="realized_cap_usd").value==300
+    assert next(p for p in points if p.metric_name=="realized_price").value==30
 
 def test_glassnode_plan_error():
     c=GlassnodeCollector("not-logged",client=client(lambda r:httpx.Response(403,json={})),retries=1)

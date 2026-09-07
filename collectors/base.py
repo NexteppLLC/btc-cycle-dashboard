@@ -61,7 +61,7 @@ class HTTPCollector(BaseCollector):
                 response = self.client.get(url, params=params)
                 response.raise_for_status()
                 return response.json()
-            except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError) as exc:
+            except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
                 retryable = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {429, 500, 502, 503, 504}
                 logger.warning("API request failed (%s), attempt %d/%d", type(exc).__name__, attempt + 1, self.retries)
                 if not retryable or attempt == self.retries - 1:

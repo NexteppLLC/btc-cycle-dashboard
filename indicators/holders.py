@@ -1,5 +1,5 @@
 """Long-term-holder distribution composite."""
-from .normalization import minmax
+from .normalization import finite_number, minmax
 
 
 def distribution_score(values: dict[str, float | None]) -> tuple[float | None, float]:
@@ -15,7 +15,7 @@ def distribution_score(values: dict[str, float | None]) -> tuple[float | None, f
 
 def sth_state(values: dict[str, float | None]) -> str | None:
     """Classify STH stress/recovery without substituting missing observations."""
-    mvrv, sopr, cost, price = (values.get(k) for k in
+    mvrv, sopr, cost, price = (finite_number(values.get(k)) for k in
                                ("sth_mvrv", "sth_sopr", "sth_realized_price", "btc_price_usd"))
     if mvrv is not None and sopr is not None and mvrv < 1 and sopr < 1:
         return "STH_STRESS"
