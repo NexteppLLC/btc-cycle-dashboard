@@ -244,16 +244,33 @@ class MetalsETFCollector(HTTPCollector):
             keywords = ("shares outstanding", "net assets", "ounces", "tonnes",
                         "fund holdings", "holdings", "as of")
             candidates = []
-            for number, row in enumerate(rows[:40], 1):
+            table_headers = []
+            worksheet = 1
+            for number, row in enumerate(rows, 1):
+                if row == ["__SPONSOR_WORKSHEET_BOUNDARY__"]:
+                    worksheet += 1
+                    continue
                 normalized_row = _norm(" ".join(row))
+                normalized_cells = {_norm(cell) for cell in row}
+                # Search every sheet and all columns for the actual data header;
+                # a long legal/preamble sheet must not consume the log budget.
+                # Only header names enter this bounded output, never data rows.
+                if (normalized_cells & DATE_FIELDS and any(word in normalized_row for word in keywords)
+                        and len(table_headers) < 12):
+                    names = [_norm(cell)[:140] for cell in row[:32]
+                             if re.search(r"[A-Za-z]", str(cell)) and _num(cell) is None and _date(cell) is None]
+                    table_headers.append({"worksheet": worksheet, "line": number,
+                                          "columns": len(row), "fields": names})
                 # Schema only: values (including dollar amounts and dates) never
                 # enter diagnostics. In key/value rows only the key is a field.
-                possible_headers = row[:1] if len(row) == 2 else row[:6]
-                names = [_norm(cell)[:60] for cell in possible_headers
-                         if re.search(r"[A-Za-z]", str(cell)) and _num(cell) is None and _date(cell) is None]
-                if number <= 5 or any(word in normalized_row for word in keywords):
-                    candidates.append({"line": number, "columns": len(row), "fields": names})
-            return {"type": "CSV", "row_count": len(rows), "candidate_rows": candidates[:15]}
+                if number <= 40 and len(candidates) < 15:
+                    possible_headers = row[:1] if len(row) == 2 else row[:6]
+                    names = [_norm(cell)[:60] for cell in possible_headers
+                             if re.search(r"[A-Za-z]", str(cell)) and _num(cell) is None and _date(cell) is None]
+                    if number <= 5 or any(word in normalized_row for word in keywords):
+                        candidates.append({"line": number, "columns": len(row), "fields": names})
+            return {"type": "CSV", "row_count": len(rows), "candidate_rows": candidates,
+                    "table_headers": table_headers}
         items = value if isinstance(value, list) else next(
             (v for v in value.values() if isinstance(v, list)), []) if isinstance(value, dict) else []
         top = sorted(map(str, value.keys()))[:30] if isinstance(value, dict) else []
@@ -289,6 +306,9 @@ class MetalsETFCollector(HTTPCollector):
                     logger.info("%s response schema=%s", fund, shape)
                     parsed = self._parse(fund, asset, str(response.url), content, start_date, end_date, fetched=fetched)
                     attempt["parsed_count"] = attempt["normalized_count"] = len(parsed)
+                    attempt["field_counts"] = {field: sum(record.get(field) is not None for record in parsed)
+                                               for field in ("physical_holdings", "ounces", "tonnes", "shares_outstanding", "net_assets")}
+                    logger.info("%s parsed field coverage=%s", fund, attempt["field_counts"])
                     if parsed:
                         attempt["status"] = "HTTP_OK_PARSE_OK"
                         records.extend(parsed)
@@ -312,8 +332,12 @@ class MetalsETFCollector(HTTPCollector):
     def _record(self, fund, asset, source, day, fetched, values):
         shares = _matching(values, ("shares outstanding", "total shares outstanding", "shares outstanding as of", "shares outstanding end of day"), "COUNT")
         ounces = _matching(values, ("total gold in trust in ounces", "total silver in trust in ounces",
+                           "total gold in trust (ounces)", "total silver in trust (ounces)",
+                           "total net asset value ounces in the trust",
                            "total ounces", "ounces in trust", "ounces", "fine ounces"), "OUNCES")
         tonnes = _matching(values, ("total gold in trust in tonnes", "total silver in trust in tonnes",
+                           "total gold in trust (tonnes)", "total silver in trust (tonnes)",
+                           "total net asset value tonnes in the trust",
                            "tonnes in trust", "tonnes", "metric tonnes"), "TONNES")
         nav = _matching(values, ("total net asset value in the trust", "total net asset value", "total net assets", "net assets",
                         "net assets of fund", "market value"), "USD")
@@ -378,6 +402,9 @@ class MetalsETFCollector(HTTPCollector):
             if normalized & table_dates and normalized & {
                 "shares outstanding", "total shares outstanding", "shares outstanding as of",
                 "total gold in trust in ounces", "total gold in trust in tonnes",
+                "total gold in trust ounces", "total gold in trust tonnes",
+                "total silver in trust ounces", "total silver in trust tonnes",
+                "total net asset value ounces in the trust", "total net asset value tonnes in the trust",
                 "total net asset value in the trust", "total net assets", "net assets",
                 "net assets of fund", "ounces in trust", "tonnes in trust",
             }:
