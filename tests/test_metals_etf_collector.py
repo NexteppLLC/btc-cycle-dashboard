@@ -143,3 +143,139 @@ def test_gld_bar_json_is_not_guessed_or_summed():
                               date(2026, 9, 1), date(2026, 9, 5)) == []
     shape = collector()._shape(content)
     assert shape["top_level_keys"] == ["bars"] and shape["weight_fields"] == ["weight"]
+
+
+def test_dated_summary_json_respects_requested_history():
+    content = '{"summary":{"date":"2026-09-04","shares outstanding":12000,"ounces in trust":3000}}'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 8, 1), date(2026, 8, 31)) == []
+
+
+def test_json_bar_market_values_are_not_fund_assets():
+    content = '{"bars":[{"date":"2026-09-04","fine ounces":400,"market value":1500000}]}'
+    assert collector()._parse("GLD", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_archive_outside_requested_dates_does_not_become_undated_snapshot():
+    assert collector()._parse("GLD", "GOLD", "official", GLD,
+                              date(2026, 8, 1), date(2026, 8, 31)) == []
+
+
+def test_native_xlsx_reads_dates_and_separate_sheets_without_crossing_columns():
+    import io
+    from openpyxl import Workbook
+    workbook = Workbook()
+    workbook.active.title = "Read Me"
+    workbook.active.append(["Official historical archive"])
+    holdings = workbook.create_sheet("Historical Archive")
+    holdings.append(["Date", "Total Shares Outstanding", "Total Gold in Trust in Ounces"])
+    holdings.append([datetime(2026, 9, 4), 12000, 3000])
+    prices = workbook.create_sheet("Price History")
+    prices.append(["Date", "Share Price", "Trading Volume"])
+    prices.append([datetime(2026, 9, 5), 100, 500])
+    raw = io.BytesIO()
+    workbook.save(raw)
+    content = collector()._decode(httpx.Response(200, content=raw.getvalue()))
+    records = collector()._parse("GLD", "GOLD", "official", content,
+                                  date(2026, 9, 1), date(2026, 9, 5))
+    assert len(records) == 1
+    assert records[0]["effective_date"] == date(2026, 9, 4)
+    assert records[0]["shares_outstanding"] == 12000
+    assert records[0]["ounces"] == 3000
+
+
+def test_native_spreadsheetml_sparse_columns_and_dated_values():
+    raw = b'''<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Historical"><Table>
+<Row><Cell><Data ss:Type="String">Date</Data></Cell><Cell ss:Index="3"><Data ss:Type="String">Shares Outstanding</Data></Cell><Cell><Data ss:Type="String">Net Assets</Data></Cell></Row>
+<Row><Cell><Data ss:Type="DateTime">2026-09-04T00:00:00</Data></Cell><Cell ss:Index="3"><Data ss:Type="Number">12000</Data></Cell><Cell><Data ss:Type="Number">36000000</Data></Cell></Row>
+</Table></Worksheet></Workbook>'''
+    content = collector()._decode(httpx.Response(200, content=raw))
+    records = collector()._parse("IAU", "GOLD", "official", content,
+                                  date(2026, 9, 1), date(2026, 9, 5))
+    assert records[0]["effective_date"] == date(2026, 9, 4)
+    assert records[0]["shares_outstanding"] == 12000
+    assert records[0]["net_assets"] == 36000000
+
+
+def test_ishares_html_uses_each_fact_date_and_never_nav_per_share():
+    content = '''<html><head><title>iShares Gold Trust | IAU</title></head><body>
+<div><span>NAV</span><span>$83.01</span><span>as of Sep 04, 2026</span></div>
+<div><span>Shares Outstanding</span><span>12,000</span><span>as of Sep 04, 2026</span></div>
+<div><span>Ounces in Trust</span><span>3,000</span><span>as of Sep 03, 2026</span></div>
+<div><span>Net Assets of Fund</span><span>$36,000,000</span><span>as of Sep 04, 2026</span></div>
+</body></html>'''
+    records = collector()._parse("IAU", "GOLD", "official", content,
+                                  date(2026, 9, 1), date(2026, 9, 5))
+    assert len(records) == 2
+    assert records[0]["effective_date"] == date(2026, 9, 3)
+    assert records[0]["ounces"] == 3000 and records[0]["shares_outstanding"] is None
+    assert records[1]["effective_date"] == date(2026, 9, 4)
+    assert records[1]["shares_outstanding"] == 12000 and records[1]["ounces"] is None
+    assert records[1]["net_assets"] == 36000000
+
+
+def test_html_requires_explicit_fact_date_and_correct_fund():
+    content = '<html><title>iShares Gold Trust | IAU</title><div>Shares Outstanding<span>12,000</span></div></html>'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+    wrong_fund = content.replace('</div>', '<span>as of Sep 04, 2026</span></div>')
+    assert collector()._parse("SLV", "SILVER", "official", wrong_fund,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_native_download_failure_uses_official_dated_product_page():
+    from collectors.metals_etf import FALLBACKS
+    content = '<html><title>iShares Gold Trust | IAU</title><div><span>Shares Outstanding</span><span>12,000</span><span>as of Sep 04, 2026</span></div></html>'
+    def handler(request):
+        if str(request.url) == FALLBACKS["IAU"][0]:
+            return httpx.Response(200, text=content)
+        return httpx.Response(200, text='<html>File unavailable</html>')
+    c = MetalsETFCollector(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    records = c.fetch_history(date(2026, 9, 1), date(2026, 9, 5))
+    assert len(records) == 1 and records[0]["fund"] == "IAU"
+    assert records[0]["source"] == FALLBACKS["IAU"][0]
+    assert c.diagnostics["IAU"]["status"] == "HTTP_OK_PARSE_OK"
+    assert c.diagnostics["IAU"]["attempts"][0]["status"] == "HTTP_OK_SCHEMA_UNEXPECTED"
+
+
+def test_corrupt_workbook_is_schema_error_after_http_success():
+    c = MetalsETFCollector(client=httpx.Client(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, content=b'PK\x03\x04bad workbook'))))
+    assert c.fetch_history(date(2026, 9, 1), date(2026, 9, 5)) == []
+    assert c.diagnostics["GLD"]["status"] == "HTTP_OK_SCHEMA_UNEXPECTED"
+
+
+def test_negative_holdings_are_unavailable():
+    content = 'Fund Holdings as of,"Sep 04, 2026"\nShares Outstanding,"-12,000"\nOunces in Trust,"-3,000"\n'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_html_undated_card_does_not_borrow_footer_date():
+    content = '<html><body><h1>iShares Gold Trust</h1><div><span>Shares Outstanding</span><span>12,000</span></div><footer>as of Sep 04, 2026</footer></body></html>'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_workbook_summary_values_keep_their_own_worksheet_dates():
+    content = 'Fund Holdings as of,"Sep 01, 2026"\nShares Outstanding,12000\n__SPONSOR_WORKSHEET_BOUNDARY__\nFund Holdings as of,"Sep 04, 2026"\nOunces in Trust,3000\n__SPONSOR_WORKSHEET_BOUNDARY__\n'
+    records = collector()._parse("IAU", "GOLD", "official", content,
+                                  date(2026, 9, 1), date(2026, 9, 5))
+    assert len(records) == 2
+    assert records[0]["effective_date"] == date(2026, 9, 1)
+    assert records[0]["shares_outstanding"] == 12000 and records[0]["ounces"] is None
+    assert records[1]["effective_date"] == date(2026, 9, 4)
+    assert records[1]["ounces"] == 3000 and records[1]["shares_outstanding"] is None
+
+
+def test_declared_units_and_usd_currency_must_match_field():
+    content = 'Fund Holdings as of,"Sep 04, 2026"\nShares Outstanding,100%\nOunces in Trust,3 tonnes\nNet Assets,€4000\n'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []
+
+
+def test_html_preserves_separate_currency_and_unit_tokens():
+    content = '<html><body><h1>iShares Gold Trust</h1><div><span>Net Assets of Fund</span><span>€</span><span>4000</span><span>as of Sep 04, 2026</span></div><div><span>Ounces in Trust</span><span>3</span><span>tonnes</span><span>as of Sep 04, 2026</span></div></body></html>'
+    assert collector()._parse("IAU", "GOLD", "official", content,
+                              date(2026, 9, 1), date(2026, 9, 5)) == []

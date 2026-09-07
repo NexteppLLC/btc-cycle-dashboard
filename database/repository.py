@@ -34,6 +34,10 @@ class Repository:
 
     def replace_scoring_details(self, day: date, details: list[dict]) -> None:
         existing = {x.component: x for x in self.session.scalars(select(ScoringDetail).where(ScoringDetail.date == day))}
+        current_components = {item["component"] for item in details}
+        for component, row in existing.items():
+            if component not in current_components:
+                self.session.delete(row)
         for item in details:
             row = existing.get(item["component"])
             if row:

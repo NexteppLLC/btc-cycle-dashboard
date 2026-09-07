@@ -1,25 +1,97 @@
 name: daily-update
 on:
+  push:
+    branches: [main]
+    paths:
+      - "**.py"
+      - "config/**"
+      - "requirements.txt"
+      - ".github/workflows/daily_update.yml"
   schedule:
     - cron: "45 22 * * *" # 07:45 JST (UTC+9)
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each run reads the current main branch after earlier updates have finished.
+# Report/database-only bot commits do not match the push paths above.
+concurrency:
+  group: daily-update-main
+  cancel-in-progress: false
+
 jobs:
   update:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions: {contents: write}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-python@v7.0.0
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
-      - run: python scripts/update_data.py
+      - name: Collect market data and assess freshness
+        id: collect
+        run: python scripts/update_data.py --diagnostics-json "$RUNNER_TEMP/update-diagnostics.json"
         env:
           GLASSNODE_API_KEY: ${{ secrets.GLASSNODE_API_KEY }}
           ETF_FLOW_CSV_URL: ${{ secrets.ETF_FLOW_CSV_URL }}
+      - name: Publish collection summary and enforce required prices
+        if: always() && (steps.collect.outcome == 'success' || steps.collect.outcome == 'failure')
+        env:
+          DIAGNOSTICS_PATH: ${{ runner.temp }}/update-diagnostics.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["DIAGNOSTICS_PATH"])
+          if not path.is_file():
+              raise SystemExit("No collection diagnostics were produced; inspect the collection step.")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          failures = data["essential_failures"]
+          warnings = data["warnings"]
+          if not isinstance(failures, list) or not isinstance(warnings, list):
+              raise SystemExit("Invalid collection diagnostics: expected lists of failures and warnings.")
+
+          def annotation(level, message):
+              escaped = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::{level}::{escaped}")
+
+          for message in warnings:
+              annotation("warning", message)
+          for message in failures:
+              annotation("error", message)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Market data update\n\n")
+              summary.write(f"Date: {data['as_of']} · Status: **{data['status']}**\n\n")
+              summary.write(f"Metric points: {data['metric_points']} · ETF records: {data['etf_records']}\n\n")
+              if failures:
+                  summary.write("### Required data failures\n\n")
+                  summary.writelines(f"- {message}\n" for message in failures)
+                  summary.write("\n")
+              if warnings:
+                  summary.write("### Data availability warnings\n\n")
+                  summary.writelines(f"- {message}\n" for message in warnings)
+                  summary.write("\n")
+              summary.write("<details><summary>Source diagnostics</summary>\n\n```json\n")
+              summary.write(json.dumps(data["sources"], ensure_ascii=False, indent=2))
+              summary.write("\n```\n</details>\n")
+
+          if failures or data["status"] == "error":
+              raise SystemExit("Required fresh price data is missing; previous published data is preserved.")
+          PY
       - name: Commit persisted report when changed
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -f reports/latest.md reports/archive data/btc_cycle.db
-          git diff --cached --quiet || git commit -m "chore: daily BTC/metals cycle update"
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily BTC/metals cycle update"
+            git push origin HEAD:main
+          fi
