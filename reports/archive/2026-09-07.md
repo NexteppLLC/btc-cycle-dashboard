@@ -39,7 +39,7 @@
 - Confidence：80.0%
 
 ## データの状態
-更新結果：取得正常
+更新結果：一部取得不可
 
 - btc_price_usd：OK · Kraken Spot XBT/USD daily OHLC / SPOT / 2026-09-06
 - gold_price_usd：OK · Yahoo Finance GC=F / FUTURES_PROXY / 2026-09-06
@@ -47,7 +47,7 @@
 - global_mvrv：OK
 - gold_cot：OK
 - silver_cot：OK
-- GLD：OK · 2026-09-04
+- GLD：PARTIAL_FIELDS · 2026-09-04
 - IAU：OK · 2026-09-04
 - SLV：OK · 2026-09-04
 
