@@ -24,10 +24,10 @@
 - 保存済み集計日（UTC）：2026-09-07
 - 価格：4,476.60 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：DISTRIBUTION / 分配局面
-- Institutional Demand：69.00 / 100
+- Institutional Demand：60.20 / 100
 - Top Risk：61.60 / 100
-- Dip Quality：43.80 / 100
-- Confidence：80.0%
+- Dip Quality：41.00 / 100
+- Confidence：100.0%
 
 ## Silver
 - 保存済み集計日（UTC）：2026-09-07
@@ -39,7 +39,7 @@
 - Confidence：80.0%
 
 ## データの状態
-更新結果：一部取得不可
+更新結果：取得正常
 
 - btc_price_usd：OK · Kraken Spot XBT/USD daily OHLC / SPOT / 2026-09-06
 - gold_price_usd：OK · Yahoo Finance GC=F / FUTURES_PROXY / 2026-09-06
@@ -47,7 +47,7 @@
 - global_mvrv：OK
 - gold_cot：OK
 - silver_cot：OK
-- GLD：PARTIAL_FIELDS · 2026-09-04
+- GLD：OK · 2026-09-04
 - IAU：OK · 2026-09-04
 - SLV：OK · 2026-09-04
 
