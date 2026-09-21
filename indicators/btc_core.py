@@ -6,10 +6,8 @@ as a low-risk signal.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import date, timedelta
 from math import isfinite
-from typing import Iterable
 
 
 def number(value):
@@ -85,28 +83,41 @@ def threshold_label(value, bands, unavailable="PARTIAL") -> str:
     return bands[-1][1]
 
 
-def sell_side_flags(value, percentile):
+def sell_side_flags(value, percentile, config=None):
+    config = config or {}
+    fixed_high = float(config.get("high", .0075))
+    fixed_compression = float(config.get("compression", .001))
+    pct_high = float(config.get("percentile_high", .90))
+    pct_compression = float(config.get("percentile_compression", .10))
+    pct_extreme = float(config.get("percentile_extreme", .95))
     value, percentile = number(value), number(percentile)
-    high = True if ((value is not None and value >= .0075) or
-                    (percentile is not None and percentile >= .90)) else (
-                    False if value is not None and value < .0075 and percentile is not None and percentile < .90 else None)
-    compression = True if ((value is not None and value <= .001) or
-                           (percentile is not None and percentile <= .10)) else (
-                           False if value is not None and value > .001 and percentile is not None and percentile > .10 else None)
-    extreme = percentile is not None and percentile >= .95
+    high = True if ((value is not None and value >= fixed_high) or
+                    (percentile is not None and percentile >= pct_high)) else (
+                    False if value is not None and value < fixed_high and percentile is not None and percentile < pct_high else None)
+    compression = True if ((value is not None and value <= fixed_compression) or
+                           (percentile is not None and percentile <= pct_compression)) else (
+                           False if value is not None and value > fixed_compression and percentile is not None and percentile > pct_compression else None)
+    extreme = percentile is not None and percentile >= pct_extreme
     return high, compression, extreme
 
 
-def short_term_state(sth_mvrv, sth_sopr) -> str:
+def short_term_state(sth_mvrv, sth_sopr, break_even=1.0) -> str:
     m, s = number(sth_mvrv), number(sth_sopr)
     if m is None or s is None: return "PARTIAL"
-    if m < 1 and s < 1: return "STRESS"
-    if m >= 1 and s < 1: return "RECOVERY"
-    if m >= 1 and s >= 1: return "HEALTHY"
+    if m < break_even and s < break_even: return "STRESS"
+    if m >= break_even and s < break_even: return "RECOVERY"
+    if m >= break_even and s >= break_even: return "HEALTHY"
     return "MIXED"
 
 
-def core_state(values: dict, distribution_coverage: float, minimum_coverage: float = 1.0) -> tuple[str, list[str]]:
+def core_state(values: dict, distribution_coverage: float, config=None) -> tuple[str, list[str]]:
+    if isinstance(config, (int, float)):
+        config = {"distribution_minimum_coverage": config}
+    config = config or {}
+    minimum_coverage = float(config.get("distribution_minimum_coverage", 1.0))
+    break_even = float(config.get("sth_break_even", 1.0))
+    lth_high = float(config.get("lth_mvrv", {}).get("high", 3.5))
+    distribution_high = float(config.get("distribution", {}).get("high", 70))
     required = ("sth_mvrv", "sth_sopr", "lth_mvrv", "distribution", "sell_side_risk")
     missing = [name for name in required if number(values.get(name)) is None]
     dates = {values.get(f"{name}_date") for name in required if values.get(f"{name}_date") is not None}
@@ -115,35 +126,55 @@ def core_state(values: dict, distribution_coverage: float, minimum_coverage: flo
     if distribution_coverage < minimum_coverage: reasons.append(f"Distribution入力充足率 {distribution_coverage:.0%}")
     if len(dates) > 1 or len(dates) < 1: reasons.append("Core 5の観測日が一致しません")
     m, s, l, d = (number(values.get(k)) for k in ("sth_mvrv", "sth_sopr", "lth_mvrv", "distribution"))
-    high, _, _ = sell_side_flags(values.get("sell_side_risk"), values.get("sell_side_percentile_4y"))
-    if missing or distribution_coverage < minimum_coverage or len(dates) != 1 or high is None:
-        return "PARTIAL", reasons or ["高優先度の状態を除外できません"]
-    if d >= 70 and (l >= 3.5 or high is True):
+    high, _, _ = sell_side_flags(values.get("sell_side_risk"), values.get("sell_side_percentile_4y"), config.get("sell_side_risk"))
+    if missing or distribution_coverage < minimum_coverage or len(dates) != 1:
+        return "PARTIAL", reasons or ["必要入力を確認できません"]
+    # Evaluate in priority order with three-valued logic. A true branch does
+    # not require an unrelated percentile merely to prove the same OR clause.
+    distribution_risk = True if d >= distribution_high and (l >= lth_high or high is True) else (
+        None if d >= distribution_high and l < lth_high and high is None else False)
+    if distribution_risk is True:
         return "DISTRIBUTION_RISK", reasons
-    if m < 1 and s < 1:
+    if distribution_risk is None:
+        return "PARTIAL", ["最優先のDISTRIBUTION_RISKを除外できません"]
+    if m < break_even and s < break_even:
         return "STRESS", reasons
-    if l >= 3.5 or high is True:
-        return "OVERHEATED", reasons + (["Sell-Sideのみの場合は実現損益の拡大に警戒"] if l < 3.5 else [])
-    if m > 1 and s >= 1 and l < 3.5 and d < 70 and high is False: return "HEALTHY_BULL", []
-    if m >= 1 and s >= 1 and d < 70: return "RECOVERY", []
+    overheated = True if l >= lth_high or high is True else (None if high is None else False)
+    if overheated is True:
+        return "OVERHEATED", reasons + (["Sell-Sideのみの場合は実現損益の拡大に警戒"] if l < lth_high else [])
+    if overheated is None:
+        return "PARTIAL", ["OVERHEATEDを除外できません"]
+    if m > break_even and s >= break_even and l < lth_high and d < distribution_high and high is False: return "HEALTHY_BULL", []
+    if m >= break_even and s >= break_even and d < distribution_high: return "RECOVERY", []
     return "MIXED", []
 
 
-def alerts(current: dict, histories: dict[str, dict[date, float | None]]) -> list[dict]:
-    day = current.get("observation_date")
-    if not isinstance(day, date): return []
+def alerts(current: dict, histories: dict[str, dict[date, float | None]], config=None,
+           distribution_coverage=1.0) -> list[dict]:
+    config = config or {}
+    break_even = float(config.get("sth_break_even", 1.0))
+    lth_high = float(config.get("lth_mvrv", {}).get("high", 3.5))
+    dist_cfg = config.get("distribution", {})
+    dist_high, dist_extreme = float(dist_cfg.get("high", 70)), float(dist_cfg.get("extreme", 80))
+    minimum = float(config.get("distribution_minimum_coverage", 1.0))
     result = []
-    def add(alert_id, severity, reason): result.append({"id": alert_id, "severity": severity, "observation_date": day, "reason": reason})
+    def add(alert_id, severity, day, reason): result.append({"id": alert_id, "severity": severity, "observation_date": day, "reason": reason})
     m, s, l, d, risk = (number(current.get(k)) for k in
                          ("sth_mvrv", "sth_sopr", "lth_mvrv", "distribution", "sell_side_risk"))
-    pm = number(histories.get("sth_mvrv", {}).get(day - timedelta(days=1)))
-    ps = number(histories.get("sth_sopr", {}).get(day - timedelta(days=1)))
-    if None not in (m, s, pm, ps) and m < 1 and s < 1 and pm < 1 and ps < 1: add("BTC5_STH_STRESS", "HIGH", "STH-MVRVとSTH-SOPRが2連続暦日で1未満")
-    if None not in (m, s, pm, ps) and m >= 1 and s >= 1 and pm >= 1 and ps >= 1: add("BTC5_STH_RECOVERY", "INFO", "STH-MVRVとSTH-SOPRが2連続暦日で1以上")
-    if l is not None and l >= 3.5: add("BTC5_LTH_HEAT_HIGH", "HIGH", "LTH-MVRVが3.5以上")
-    if d is not None and d >= 70: add("BTC5_LTH_DISTRIBUTION_HIGH", "EXTREME" if d >= 80 else "HIGH", "Distributionが70以上")
-    high, compression, extreme = sell_side_flags(risk, current.get("sell_side_percentile_4y"))
-    if compression: add("BTC5_SELL_SIDE_COMPRESSION", "INFO", "固定値または4年PercentileがCompression域")
-    if high: add("BTC5_SELL_SIDE_HIGH", "EXTREME" if extreme else "HIGH", "固定値または4年PercentileがHigh域")
-    if d is not None and d >= 70 and ((l is not None and l >= 3.5) or high): add("BTC5_DISTRIBUTION_RISK", "EXTREME" if d >= 80 or extreme else "HIGH", "Distribution高水準かつLTH HeatまたはSell-Side High")
+    sth_day = current.get("sth_mvrv_date") if current.get("sth_mvrv_date") == current.get("sth_sopr_date") else None
+    if isinstance(sth_day, date):
+        pm = number(histories.get("sth_mvrv", {}).get(sth_day - timedelta(days=1)))
+        ps = number(histories.get("sth_sopr", {}).get(sth_day - timedelta(days=1)))
+        if None not in (m, s, pm, ps) and m < break_even and s < break_even and pm < break_even and ps < break_even: add("BTC5_STH_STRESS", "HIGH", sth_day, "STH-MVRVとSTH-SOPRが2連続暦日で損益分岐未満")
+        if None not in (m, s, pm, ps) and m >= break_even and s >= break_even and pm >= break_even and ps >= break_even: add("BTC5_STH_RECOVERY", "INFO", sth_day, "STH-MVRVとSTH-SOPRが2連続暦日で損益分岐以上")
+    lth_day, dist_day, risk_day = (current.get(f"{name}_date") for name in ("lth_mvrv", "distribution", "sell_side_risk"))
+    if l is not None and isinstance(lth_day, date) and l >= lth_high: add("BTC5_LTH_HEAT_HIGH", "HIGH", lth_day, f"LTH-MVRVが{lth_high:g}以上")
+    dist_valid = d is not None and isinstance(dist_day, date) and distribution_coverage >= minimum
+    if dist_valid and d >= dist_high: add("BTC5_LTH_DISTRIBUTION_HIGH", "EXTREME" if d >= dist_extreme else "HIGH", dist_day, f"Distributionが{dist_high:g}以上")
+    high, compression, extreme = sell_side_flags(risk, current.get("sell_side_percentile_4y"), config.get("sell_side_risk"))
+    if isinstance(risk_day, date) and compression: add("BTC5_SELL_SIDE_COMPRESSION", "INFO", risk_day, "固定値または4年PercentileがCompression域")
+    if isinstance(risk_day, date) and high: add("BTC5_SELL_SIDE_HIGH", "EXTREME" if extreme else "HIGH", risk_day, "固定値または4年PercentileがHigh域")
+    heat_same_day = l is not None and l >= lth_high and lth_day == dist_day
+    sell_same_day = high is True and risk_day == dist_day
+    if dist_valid and d >= dist_high and (heat_same_day or sell_same_day): add("BTC5_DISTRIBUTION_RISK", "EXTREME" if d >= dist_extreme or extreme else "HIGH", dist_day, "Distribution高水準かつ同日LTH HeatまたはSell-Side High")
     return result

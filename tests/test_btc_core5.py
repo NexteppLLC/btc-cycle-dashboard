@@ -9,6 +9,10 @@ from indicators.btc_core import (alerts, calendar_sma, core_state, exact_change,
                                  rolling_percentile, sell_side_raw,
                                  short_term_state)
 from services.report_service import report_text
+from services.core5_service import build_core5
+from database.repository import Repository
+from database.session import create_schema, session_scope
+from database.models import Metric
 from types import SimpleNamespace
 
 
@@ -109,7 +113,7 @@ def point(name, value, timestamp=STAMP, **metadata):
                   "provider_timestamp": timestamp.isoformat(), **metadata})
 
 
-def test_sell_side_derivation_rejects_misaligned_timestamp_provider_asset_unit_methodology(monkeypatch):
+def test_sell_side_derivation_rejects_misaligned_timestamp_provider_asset_unit_methodology():
     collector = GlassnodeCollector("not-a-secret")
     names = list(collector.SELL_SIDE_ENDPOINTS)
     valid = [point(name, value) for name, value in zip(names, (2, 1, 1000))]
@@ -123,7 +127,8 @@ def test_sell_side_derivation_rejects_misaligned_timestamp_provider_asset_unit_m
         [valid[0], valid[1].model_copy(update={"metadata": {**valid[1].metadata, "methodology": "OTHER"}}), valid[2]],
     ]
     for inputs in mutations:
-        assert not any(p.metric_name == "sell_side_risk_raw" for p in collector._sell_side_points(inputs, DAY, DAY))
+        assert not any(p.metric_name == "sell_side_risk_raw" and p.status == MetricStatus.OK
+                       for p in collector._sell_side_points(inputs, DAY, DAY))
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -160,3 +165,120 @@ def test_report_contains_same_core_state_substates_and_alert_provenance():
     assert "BTC 5-Signal State：PARTIAL" in text
     assert "Short-Term Health：PARTIAL" in text
     assert "BTC5_LTH_HEAT_HIGH · HIGH · 観測日 2026-09-20" in text
+
+
+CORE_CFG = {"distribution_minimum_coverage": 1.0, "sth_break_even": 1.0,
+    "lth_mvrv": {"capitulation": 1, "low_early": 2, "high": 3.5, "extreme": 5},
+    "distribution": {"low": 40, "rising": 60, "high": 70, "extreme": 80},
+    "sell_side_risk": {"compression": .001, "high": .0075, "percentile_compression": .1,
+                       "percentile_high": .9, "percentile_extreme": .95}}
+
+
+def metric_row(name, value, day=DAY, methodology="fixture-v1", status="OK"):
+    stamp = datetime.combine(day, datetime.min.time(), timezone.utc)
+    return {"metric_name": name, "value": value, "date": day, "timestamp": stamp,
+            "effective_date": day, "source": "fixture", "status": status,
+            "fetched_at": STAMP + timedelta(hours=12), "methodology": methodology,
+            "price_type": None, "error": None}
+
+
+def current_core_rows(day=DAY):
+    return [metric_row("sth_mvrv", 1.1, day), metric_row("sth_sopr", 1.1, day),
+            metric_row("lth_mvrv", 4, day), metric_row("sell_side_risk_15d", .003, day)]
+
+
+def distribution_snapshot(day=DAY, observed=DAY, value=80, coverage=1.0):
+    return {"date": day, "lth_distribution": value,
+            "lth_distribution_observed_date": observed,
+            "lth_distribution_coverage": coverage}
+
+
+def test_build_core5_keeps_independent_alerts_when_other_signals_are_missing():
+    rows = [metric_row("lth_mvrv", 4)]
+    result = build_core5(rows, [distribution_snapshot()], CORE_CFG, DAY)
+    assert result["state"] == "PARTIAL"
+    assert {item["id"] for item in result["alerts"]} == {
+        "BTC5_LTH_HEAT_HIGH", "BTC5_LTH_DISTRIBUTION_HIGH", "BTC5_DISTRIBUTION_RISK"}
+
+
+def test_build_core5_never_substitutes_snapshot_date_for_distribution_observation():
+    result = build_core5(current_core_rows(), [distribution_snapshot(observed=None)], CORE_CFG, DAY)
+    assert result["state"] == "PARTIAL"
+    assert result["cards"]["distribution"]["date"] is None
+    assert result["cards"]["distribution"]["value"] is None
+    assert not any("DISTRIBUTION" in item["id"] for item in result["alerts"])
+
+
+def test_build_core5_applies_configured_thresholds_to_states_substates_and_alerts():
+    config = {**CORE_CFG, "lth_mvrv": {**CORE_CFG["lth_mvrv"], "high": 4.5}}
+    result = build_core5(current_core_rows(), [distribution_snapshot(value=60)], config, DAY)
+    assert result["substates"]["cycle_heat"] == "NORMAL_BULL"
+    assert "BTC5_LTH_HEAT_HIGH" not in {item["id"] for item in result["alerts"]}
+    assert result["state"] != "DISTRIBUTION_RISK"
+
+
+def test_build_core5_proves_higher_priority_distribution_risk_without_percentile():
+    result = build_core5(current_core_rows(), [distribution_snapshot()], CORE_CFG, DAY)
+    assert result["cards"]["sell_side_risk"]["percentile_4y"]["value"] is None
+    assert result["state"] == "DISTRIBUTION_RISK"
+
+
+def test_build_core5_does_not_mix_methodologies_for_percentile():
+    start = DAY - timedelta(days=363)
+    rows = [metric_row("sth_mvrv", 1 + i / 1000, start + timedelta(days=i), "old") for i in range(363)]
+    rows.append(metric_row("sth_mvrv", 1.5, DAY, "new"))
+    result = build_core5(rows, [], CORE_CFG, DAY)
+    stat = result["cards"]["sth_mvrv"]["percentile_52w"]
+    assert stat["status"] == "INSUFFICIENT_HISTORY"
+    assert stat["count"] == 1
+
+
+def test_build_core5_marks_stale_value_with_date_and_reason_and_report_matches():
+    old = DAY - timedelta(days=4)
+    result = build_core5([metric_row("lth_mvrv", 4, old)], [], CORE_CFG, DAY)
+    card = result["cards"]["lth_mvrv"]
+    assert card["value"] is None and card["status"] == "STALE" and card["date"] == old
+    assert "4暦日経過" in card["reason"]
+    snapshot = SimpleNamespace(date=DAY, btc_price=None, cycle_phase="PARTIAL", confidence=0,
+        cycle_score=None, top_risk_score=None, global_mvrv=None, mvrv_zscore=None,
+        lth_mvrv=None, sth_mvrv=None, lth_distribution=None, etf_flow_1d=None, etf_flow_7d=None)
+    text = report_text(snapshot, core5=result)
+    assert f"LTH-MVRV：取得不可 · 観測日 {old} · Status STALE" in text
+    assert "理由 観測日から4暦日経過" in text
+
+
+def test_sell_side_missing_overwrites_saved_current_value_and_recovery_restores_it(tmp_path):
+    url = f"sqlite:///{tmp_path / 'core5.db'}"
+    create_schema(url)
+    collector = GlassnodeCollector("fixture")
+    names = list(collector.SELL_SIDE_ENDPOINTS)
+    days = [DAY - timedelta(days=i) for i in range(14, -1, -1)]
+    def inputs(missing_latest=False):
+        rows = []
+        for day in days:
+            stamp = datetime.combine(day, datetime.min.time(), timezone.utc)
+            for name, value in zip(names, (2, 1, 1000)):
+                row = point(name, value, stamp)
+                if missing_latest and day == DAY and name == names[0]:
+                    row = row.model_copy(update={"value": None, "status": MetricStatus.MISSING})
+                rows.append(row)
+        return rows
+    with session_scope(url) as session:
+        repo = Repository(session)
+        repo.upsert_metrics(collector._sell_side_points(inputs(), DAY, DAY))
+    with session_scope(url) as session:
+        assert session.query(Metric).filter_by(
+            metric_name="sell_side_risk_15d", date=DAY).one().status == "OK"
+        Repository(session).upsert_metrics(collector._sell_side_points(inputs(True), DAY, DAY))
+    with session_scope(url) as session:
+        row = session.query(Metric).filter_by(
+            metric_name="sell_side_risk_15d", date=DAY).one()
+        assert row.status == "MISSING" and row.value is None
+        core = build_core5(Repository(session).metrics(), [], CORE_CFG, DAY)
+        assert core["cards"]["sell_side_risk"]["value"] is None
+        Repository(session).upsert_metrics(collector._sell_side_points(inputs(), DAY, DAY))
+    with session_scope(url) as session:
+        row = session.query(Metric).filter_by(
+            metric_name="sell_side_risk_15d", date=DAY).one()
+        assert row.status == "OK" and row.value == pytest.approx(.003)
+        assert build_core5(Repository(session).metrics(), [], CORE_CFG, DAY)["cards"]["sell_side_risk"]["value"] == pytest.approx(.003)

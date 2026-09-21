@@ -41,7 +41,7 @@ def observation_date(row) -> date | None:
     return None
 
 
-def _source_key(row) -> tuple[str, str]:
+def _source_key(row) -> tuple[str, str, str]:
     source = str(field(row, "source", ""))
     if source in {"Glassnode availability", "Glassnode API v1 availability",
                   "CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV availability",
@@ -54,7 +54,8 @@ def _source_key(row) -> tuple[str, str]:
     if source == "Glassnode":
         source = ("CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV"
                   if field(row, "metric_name") == "lth_realized_price" else "Glassnode API v1")
-    return source, str(field(row, "price_type", "") or "")
+    return (source, str(field(row, "price_type", "") or ""),
+            str(field(row, "methodology", "") or ""))
 
 
 def _fetched_key(row) -> str:

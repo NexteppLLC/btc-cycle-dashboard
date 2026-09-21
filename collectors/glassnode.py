@@ -154,52 +154,77 @@ class GlassnodeCollector(HTTPCollector):
     def _sell_side_points(self, inputs, start_date, end_date):
         """Derive only exact-timestamp, same-provider, confirmed UTC daily values."""
         by_metric = {name: {} for name in self.SELL_SIDE_ENDPOINTS}
-        diagnostics = []
+        request_diagnostics = []
         for point in inputs:
-            if point.status == MetricStatus.OK and point.value is not None:
-                by_metric[point.metric_name][point.timestamp] = point
-            elif point.timestamp.date() >= start_date:
-                diagnostics.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp,
-                    value=None, source=f"{self.SOURCE} Sell-Side Risk availability", fetched_at=point.fetched_at,
-                    status=point.status, metadata={"asset": "BTC", "error": point.metadata.get("error", "Sell-Side input unavailable")}))
+            if point.metric_name not in by_metric:
+                continue
+            if point.source.endswith(" availability"):
+                request_diagnostics.append(point)
+            else:
+                by_metric[point.metric_name].setdefault(point.timestamp.date(), []).append(point)
         raw = {}
         raw_points = []
         # The UTC day in progress is not a confirmed daily observation.
         confirmed_before = datetime.now(timezone.utc).date()
-        timestamps = set.intersection(*(set(rows) for rows in by_metric.values())) if by_metric else set()
-        for timestamp in sorted(timestamps):
-            if timestamp.date() >= confirmed_before:
+        observed_days = set().union(*(set(rows) for rows in by_metric.values()))
+        for day in sorted(observed_days):
+            if day >= confirmed_before:
                 continue
-            triplet = [by_metric[name][timestamp] for name in self.SELL_SIDE_ENDPOINTS]
-            if any(p.source != self.SOURCE or p.metadata.get("asset") != "BTC" or
-                   p.metadata.get("unit") != "USD" or
-                   p.metadata.get("methodology") != "GLASSNODE_NETWORK_REALIZED_VALUE" for p in triplet):
-                continue
-            value = sell_side_raw(*(p.value for p in triplet))
+            candidates = [by_metric[name].get(day, []) for name in self.SELL_SIDE_ENDPOINTS]
+            triplet = [rows[-1] for rows in candidates if len(rows) == 1]
+            timestamps = {point.timestamp for point in triplet}
+            valid = len(triplet) == 3 and len(timestamps) == 1 and all(
+                p.status == MetricStatus.OK and p.value is not None and p.source == self.SOURCE
+                and p.metadata.get("asset") == "BTC" and p.metadata.get("unit") == "USD"
+                and p.metadata.get("methodology") == "GLASSNODE_NETWORK_REALIZED_VALUE" for p in triplet)
+            timestamp = min(timestamps) if timestamps else datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            fetched_at = max((p.fetched_at for rows in candidates for p in rows), default=datetime.now(timezone.utc))
+            value = sell_side_raw(*(p.value for p in triplet)) if valid else None
             if value is None:
+                status = MetricStatus.ERROR if any(p.status == MetricStatus.ERROR for rows in candidates for p in rows) or (len(triplet) == 3 and len(timestamps) != 1) else MetricStatus.MISSING
+                raw_points.append(MetricPoint(metric_name="sell_side_risk_raw", timestamp=timestamp, value=None,
+                    source=self.SOURCE, fetched_at=fetched_at, status=status,
+                    metadata={"asset": "BTC", "unit": "ratio", "methodology": "(realized_profit_usd + realized_loss_usd) / realized_cap_usd",
+                              "formula": "(profit + loss) / realized_cap", "provider_timestamp": timestamp.isoformat(),
+                              "error": "Sell-Side inputs missing, invalid, or not aligned"}))
                 continue
-            raw[timestamp.date()] = value
+            raw[day] = value
             raw_points.append(MetricPoint(metric_name="sell_side_risk_raw", timestamp=timestamp, value=value,
-                source=self.SOURCE, fetched_at=max(p.fetched_at for p in triplet), status=MetricStatus.OK,
+                source=self.SOURCE, fetched_at=fetched_at, status=MetricStatus.OK,
                 metadata={"asset": "BTC", "unit": "ratio", "methodology": "(realized_profit_usd + realized_loss_usd) / realized_cap_usd",
                           "formula": "(profit + loss) / realized_cap", "provider_timestamp": timestamp.isoformat(),
                           "input_metrics": list(self.SELL_SIDE_ENDPOINTS)}))
         derived = list(raw_points)
-        for point in raw_points:
-            if point.timestamp.date() < start_date or point.timestamp.date() > end_date:
+        for day in (start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)):
+            if day >= confirmed_before:
                 continue
-            value = calendar_sma(raw, point.timestamp.date(), 15)
+            value = calendar_sma(raw, day, 15)
+            matching = [p for p in raw_points if p.timestamp.date() == day]
+            timestamp = matching[-1].timestamp if matching else datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            fetched_at = max((p.fetched_at for p in raw_points
+                              if day - timedelta(days=14) <= p.timestamp.date() <= day), default=datetime.now(timezone.utc))
             if value is not None:
-                derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp, value=value,
-                    source=self.SOURCE, fetched_at=point.fetched_at, status=MetricStatus.OK,
+                derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=timestamp, value=value,
+                    source=self.SOURCE, fetched_at=fetched_at, status=MetricStatus.OK,
                     metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
-                              "formula": "SMA15(sell_side_risk_raw)", "provider_timestamp": point.timestamp.isoformat()}))
-        if not any(p.metric_name == "sell_side_risk_15d" and p.status == MetricStatus.OK for p in derived):
-            if diagnostics:
-                derived.append(max(diagnostics, key=lambda p: p.fetched_at))
+                              "formula": "SMA15(sell_side_risk_raw)", "provider_timestamp": timestamp.isoformat()}))
             else:
-                status = MetricStatus.UNAVAILABLE_NO_API_KEY if not self.api_key else MetricStatus.MISSING
-                derived.append(self._unavailable("sell_side_risk_15d", status))
+                derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=timestamp, value=None,
+                    source=self.SOURCE, fetched_at=fetched_at, status=MetricStatus.MISSING,
+                    metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
+                              "formula": "SMA15(sell_side_risk_raw)", "provider_timestamp": timestamp.isoformat(),
+                              "error": "連続15暦日の有効なSell-Side raw入力が揃っていません"}))
+        if request_diagnostics:
+            point = max(request_diagnostics, key=lambda p: p.fetched_at)
+            derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp, value=None,
+                source=f"{self.SOURCE} Sell-Side Risk availability", fetched_at=point.fetched_at, status=point.status,
+                metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
+                          "error": point.metadata.get("error", "Sell-Side input unavailable")}))
+        elif not any(p.metric_name == "sell_side_risk_15d" for p in derived):
+            status = MetricStatus.UNAVAILABLE_NO_API_KEY if not self.api_key else MetricStatus.MISSING
+            point = self._unavailable("sell_side_risk_15d", status)
+            point.metadata.update({"unit": "ratio", "methodology": "15_calendar_day_simple_moving_average"})
+            derived.append(point)
         return derived
 
     def fetch_latest(self) -> list[MetricPoint]:

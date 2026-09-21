@@ -44,7 +44,8 @@ def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
         for key, label in labels.items():
             card = core5["cards"][key]
             value = fmt(card["value"] * 100, "%", 3) if key == "sell_side_risk" and card["value"] is not None else fmt(card["value"], digits=3)
-            text += f'- {label}：{value} · 観測日 {card["date"] or "取得不可"} · Status {card["status"]}\n'
+            reason = f' · 理由 {card["reason"]}' if card.get("reason") else ""
+            text += f'- {label}：{value} · 観測日 {card["date"] or "取得不可"} · Status {card["status"]}{reason}\n'
         text += f'- Short-Term Health：{core5["substates"]["short_term_health"]}\n'
         text += f'- Cycle Heat：{core5["substates"]["cycle_heat"]}\n'
         text += f'- Distribution Pressure：{core5["substates"]["distribution_pressure"]}\n'
