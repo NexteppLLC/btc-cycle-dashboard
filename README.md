@@ -51,6 +51,7 @@ python scripts/update_data.py --diagnostics-json data/update-diagnostics.json
 | Market Cap / Supply / Active Addresses / Transactions | Coin Metrics Communityの利用可能な公開指標を取得。拒否された1項目で他の項目まで失敗させない |
 | Global Realized Cap / Realized Price | 同一時点の実測Market Cap ÷ MVRV、さらにSupplyで除算。式と由来を区別し、入力が欠けたら取得不可 |
 | LTH/STH MVRV・SOPR・Supply等 | 対応するGlassnode契約とAPIキーが必要。無料モードで別指標からコホート値を推定しない |
+| Sell-Side Risk Ratio | GlassnodeのRealized Profit・Realized Loss・Realized Capを同日・同一取得元で揃え、`15日SMA((Profit + Loss) / Realized Cap)`を計算。15日未満、日付不一致、権限不足は取得不可 |
 | 金・銀価格 | Yahooの日足。現物→先物→ETF代理値の優先順。`source` / `price_type` / 観測日を表示 |
 | GLD | [SPDR公式の履歴ページ](https://www.spdrgoldshares.com/usa/historical-data/)から案内されるネイティブExcel履歴 |
 | IAU / SLV | [IAU](https://www.ishares.com/us/products/239561/ishares-gold-trust-fund) / [SLV](https://www.ishares.com/us/products/239855/ishares-silver-trust-fund)の公式BlackRockダウンロード、または観測日が明示されたスポンサーの保有量表示 |
@@ -90,14 +91,16 @@ APIキーや、認証情報を含むCSV URLをコード・ログ・Issueへ貼�
 
 ## 画面と判定
 
-- **Overview**: 保存済み集計日、BTCフェーズ・スコア・充足度、3資産の概要。
-- **Bitcoin**: 価格・移動平均・MVRV・Realized Priceチャート、LTH/STHの全指標と取得元。取得状況欄でAPIキー未設定・利用権限・公開待ち・期限切れを確認できます。
+- **Overview**: 保存済み集計日、BTCフェーズ・Core 5 State・スコア・充足度、3資産の概要。
+- **Bitcoin**: 最上部にSTH-MVRV、STH-SOPR、LTH-MVRV、LTH Distribution、Sell-Side Riskの5連モニターを表示。続いて価格・移動平均・MVRV・Realized Priceチャート、LTH/STHの全指標と取得元を確認できます。
 - **Gold / Silver**: 価格の種類と単位、需要・天井リスク・押し目評価、CFTCとETF保有量。
 - **Compare**: BTC・金・銀の比較。BTC Cycleと金銀Demandは別の指標。
 - **History**: スコアとフェーズの保存履歴。
 - **System**: 取得元・観測日・取得日時・欠損理由・データ鮮度。
 
 Cycle Score、Top Risk、Confidenceの閾値・重みは [`config/thresholds.yaml`](config/thresholds.yaml) にあります。欠損成分は利用可能成分へ再配分しますが、Confidenceと最低条件によって正式判定を制限します。低い参考Top Riskは「安全」を意味しません。
+
+BTC Core 5は、短期保有者の状態、長期保有者の含み益、実際の分配、ネットワーク全体の価値確定圧力を毎日読むための**観測レイヤー**です。`HEALTHY BULL`、`RECOVERY`、`STRESS`、`OVERHEATED`、`DISTRIBUTION RISK`等を表示しますが、既存Cycle Score・Top Risk・Phaseの重みにはまだ組み込みません。必要な5指標が揃わない場合は`PARTIAL`または`UNAVAILABLE`とし、欠損を「低リスク」と解釈しません。
 
 LTH Distributionは複数指標の合成値です。Confidenceへの寄与は実際に揃った構成データの割合に応じて計算します。例えばLTH-SOPRのみ取得できた場合、分配指標の25%が揃った扱いとなり、100%取得済みとはみなしません。ETFについても判定に使う7暦日合計が揃った場合に充足度へ計上します。
 

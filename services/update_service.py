@@ -16,14 +16,15 @@ from config.settings import ROOT, get_settings
 from database.repository import Repository
 from database.session import create_schema, session_scope
 from indicators.etf import etf_aggregates
+from indicators.btc_core import build_core5, sell_side_risk_series
 from indicators.holders import distribution_score, sth_state
 from indicators.normalization import finite_number
 from indicators.technical import calculate_technicals
 from scoring.cycle_score import calculate_cycle_score
-from scoring.regime import btc_minimum_data, classify_phase, weighted_confidence
+from scoring.regime import btc_minimum_data, classify_phase, detect_core5_alerts, weighted_confidence
 from scoring.top_risk import calculate_top_risk
 from scoring.metals import calculate_metals_scores, percentile, position_statistics
-from services.data_quality import as_date, field, metric_current, metric_series, observation_date
+from services.data_quality import as_date, current_metric_row, field, metric_current, metric_series, observation_date
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,64 @@ def build_btc_inputs(rows, end):
     state = sth_state(values)
     values["sth_state"] = 100 if state == "RECOVERY_CONFIRMATION" else 0 if state == "STH_STRESS" else None
     return values, flow, coverage
+
+
+def build_btc_core5(rows, end, distribution_value=None, distribution_history=None, cfg=None):
+    """Build the Core 5 observation layer from current, same-provider data."""
+    cfg = cfg or load_thresholds()
+    core_cfg = cfg["btc_core5"]
+    metric_names = ("sth_mvrv", "sth_sopr", "lth_mvrv")
+    series = {name: metric_series(rows, name, end) for name in metric_names}
+    profit = metric_series(rows, "realized_profit", end)
+    loss = metric_series(rows, "realized_loss", end)
+    cap = metric_series(rows, "glassnode_realized_cap_usd", end)
+    risk_series = sell_side_risk_series(
+        profit,
+        loss,
+        cap,
+        window=int(core_cfg["sell_side_risk"]["window"]),
+    )
+
+    current = {name: metric_current(rows, name, end) for name in metric_names}
+    dates = {}
+    for name in metric_names:
+        row = current_metric_row(rows, name, end)
+        dates[name] = observation_date(row) if row is not None else None
+
+    # Sell-Side Risk is valid only when all three current Glassnode inputs are
+    # measured on the same observation date.  The rolling function additionally
+    # requires fifteen consecutive, valid daily triples.
+    input_rows = [current_metric_row(rows, name, end) for name in (
+        "realized_profit", "realized_loss", "glassnode_realized_cap_usd"
+    )]
+    input_dates = [observation_date(row) for row in input_rows if row is not None]
+    input_sources = [field(row, "source") for row in input_rows if row is not None]
+    risk_date = (input_dates[0] if len(input_dates) == 3 and len(set(input_dates)) == 1
+                 and len(set(input_sources)) == 1 else None)
+    risk_value = None
+    if risk_date is not None and not risk_series.empty:
+        risk_value = finite_number(risk_series.get(pd.Timestamp(risk_date, tz="UTC")))
+
+    if distribution_history is None:
+        distribution_series = pd.Series(dtype=float)
+    else:
+        distribution_series = pd.Series(distribution_history, dtype=float)
+    if distribution_value is not None:
+        distribution_series.loc[end] = distribution_value
+
+    series.update({"lth_distribution": distribution_series, "sell_side_risk": risk_series})
+    current.update({"lth_distribution": distribution_value, "sell_side_risk": risk_value})
+    dates.update({"lth_distribution": end if distribution_value is not None else None,
+                  "sell_side_risk": risk_date if risk_value is not None else None})
+    result = build_core5(series, current, dates, core_cfg)
+    alert_values = {
+        **result["values"],
+        **result["streaks"],
+        "sell_side_percentile_4y": result["cards"]["sell_side_risk"]["percentile_4y"],
+        "btc5_state": result["state"],
+    }
+    result["alerts"] = detect_core5_alerts(alert_values, cfg)
+    return result
 
 
 def btc_input_eligibility(values, flow, distribution_coverage, cfg):
@@ -224,6 +283,12 @@ def run_update(days: int = 1500) -> dict:
         rows = repo.metrics()
         values, flow, dist_coverage = build_btc_inputs(rows, end)
         cfg = load_thresholds()
+        existing_snapshots = repo.snapshots()
+        distribution_history = pd.Series(
+            {item.date: item.lth_distribution for item in existing_snapshots
+             if item.lth_distribution is not None}, dtype=float
+        )
+        core5 = build_btc_core5(rows, end, values.get("lth_distribution"), distribution_history, cfg)
         cycle = calculate_cycle_score(values, cfg["cycle"])
         top = calculate_top_risk(values, cfg["top_risk"])
         eligibility = btc_input_eligibility(values, flow, dist_coverage, cfg)
@@ -250,4 +315,5 @@ def run_update(days: int = 1500) -> dict:
                                    "demand_score": scores.demand, "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality,
                                    "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
         return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points),
-                "etf_records": etf_saved, "distribution_coverage": dist_coverage}
+                "etf_records": etf_saved, "distribution_coverage": dist_coverage,
+                "core5": core5}

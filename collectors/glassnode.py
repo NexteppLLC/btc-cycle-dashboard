@@ -25,6 +25,12 @@ class GlassnodeCollector(HTTPCollector):
         "sth_spent_volume": "transactions/transfers_volume_entity_adjusted_from_sth_sum",
         "lth_realized_profit": "indicators/realized_profit_lth_account_based",
         "lth_realized_loss": "indicators/realized_loss_lth_account_based",
+        "realized_profit": "indicators/realized_profit",
+        "realized_loss": "indicators/realized_loss",
+        # Keep a provider-specific name.  The free on-chain adapter can derive
+        # realized_cap_usd from Coin Metrics, but Sell-Side Risk must not mix
+        # inputs from different providers.
+        "glassnode_realized_cap_usd": "market/marketcap_realized_usd",
         "cdd": "indicators/cdd",
         "dormancy": "indicators/average_dormancy",
     }
@@ -60,7 +66,8 @@ class GlassnodeCollector(HTTPCollector):
                         value = float(row["v"])
                         if not math.isfinite(value) or (metric != "mvrv_zscore" and value < 0):
                             raise ValueError("Invalid numeric observation")
-                        if ("mvrv" in metric or "price" in metric) and metric != "mvrv_zscore" and value == 0:
+                        if (("mvrv" in metric or "price" in metric or metric == "glassnode_realized_cap_usd")
+                                and metric != "mvrv_zscore" and value == 0):
                             raise ValueError("Invalid zero ratio or price")
                         status = MetricStatus.OK
                     except (TypeError, ValueError, OverflowError):

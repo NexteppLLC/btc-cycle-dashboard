@@ -30,6 +30,27 @@ warnings:
   trend_deviation_high: 0.50
   sth_profitability: 1.0
   etf_7d_negative: 0
+btc_core5:
+  sth:
+    mvrv_profit: 1.0
+    mvrv_healthy: 1.10
+    sopr_profit: 1.0
+    sopr_profit_taking: 1.05
+  lth_mvrv:
+    normal: 1.0
+    high: 3.5
+    extreme: 5.0
+  distribution:
+    rising: 60
+    high: 70
+    extreme: 80
+  sell_side_risk:
+    window: 15
+    low: 0.001
+    high: 0.0075
+    percentile_low: 0.10
+    percentile_high: 0.90
+    percentile_extreme: 0.95
 phase:
   top_risk: 75
   distribution: 70

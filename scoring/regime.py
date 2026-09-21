@@ -60,6 +60,40 @@ def calculate_confidence(*, coverage: float, glassnode: bool, etf_current: bool,
     return round(max(0, min(100, score)), 1)
 
 
+def detect_core5_alerts(values: dict, config: dict) -> list[str]:
+    """Return Core 5 events without turning missing values into benign states."""
+    cfg = config["btc_core5"]
+    alerts = []
+    numbers = {key: finite_number(values.get(key)) for key in (
+        "lth_mvrv", "lth_distribution", "sell_side_risk", "sell_side_percentile_4y",
+        "sth_stress_days", "sth_recovery_days",
+    )}
+    if numbers["sth_stress_days"] is not None and numbers["sth_stress_days"] >= 2:
+        alerts.append("BTC5_STH_STRESS")
+    if numbers["sth_recovery_days"] is not None and numbers["sth_recovery_days"] >= 2:
+        alerts.append("BTC5_STH_RECOVERY")
+    if numbers["lth_mvrv"] is not None and numbers["lth_mvrv"] >= cfg["lth_mvrv"]["high"]:
+        alerts.append("BTC5_LTH_HEAT_HIGH")
+    if numbers["lth_distribution"] is not None and numbers["lth_distribution"] >= cfg["distribution"]["high"]:
+        alerts.append("BTC5_LTH_DISTRIBUTION_HIGH")
+    if numbers["lth_distribution"] is not None and numbers["lth_distribution"] >= cfg["distribution"]["extreme"]:
+        alerts.append("BTC5_LTH_DISTRIBUTION_EXTREME")
+    risk, percentile = numbers["sell_side_risk"], numbers["sell_side_percentile_4y"]
+    low_level = risk is not None and risk <= cfg["sell_side_risk"]["low"]
+    high_level = risk is not None and risk >= cfg["sell_side_risk"]["high"]
+    if low_level or (not high_level and percentile is not None
+                     and percentile <= cfg["sell_side_risk"]["percentile_low"]):
+        alerts.append("BTC5_SELL_SIDE_COMPRESSION")
+    if high_level or (not low_level and percentile is not None
+                      and percentile >= cfg["sell_side_risk"]["percentile_high"]):
+        alerts.append("BTC5_SELL_SIDE_HIGH")
+    if not low_level and percentile is not None and percentile >= cfg["sell_side_risk"]["percentile_extreme"]:
+        alerts.append("BTC5_SELL_SIDE_EXTREME")
+    if values.get("btc5_state") == "DISTRIBUTION RISK":
+        alerts.append("BTC5_DISTRIBUTION_RISK")
+    return alerts
+
+
 def detect_alerts(values: dict, config: dict) -> list[str]:
     w = config["warnings"]; alerts = []
     numbers = {key: finite_number(values.get(key)) for key in
@@ -73,4 +107,7 @@ def detect_alerts(values: dict, config: dict) -> list[str]:
     if values.get("sth_state") == "RECOVERY_CONFIRMATION": alerts.append("STH_RECOVERY")
     if numbers["etf_flow_7d"] is not None and numbers["etf_flow_7d"] < w["etf_7d_negative"]: alerts.append("ETF_7D_NEGATIVE")
     if values.get("previous_phase") and values.get("phase") != values["previous_phase"]: alerts.append("CYCLE_PHASE_CHANGE")
+    for alert in detect_core5_alerts(values, config):
+        if alert not in alerts:
+            alerts.append(alert)
     return alerts

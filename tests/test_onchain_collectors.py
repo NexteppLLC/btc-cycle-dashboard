@@ -161,6 +161,9 @@ def test_glassnode_correct_routes_and_same_timestamp_lth_identity():
     assert "transactions/transfers_volume_entity_adjusted_from_sth_sum" in requested
     assert "indicators/realized_profit_lth_account_based" in requested
     assert "indicators/realized_loss_lth_account_based" in requested
+    assert "indicators/realized_profit" in requested
+    assert "indicators/realized_loss" in requested
+    assert "market/marketcap_realized_usd" in requested
     lth = next(p for p in points if p.metric_name == "lth_realized_price")
     assert lth.value == 20000
     assert lth.source == "CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV"
@@ -188,6 +191,14 @@ def test_glassnode_empty_response_is_explicitly_missing():
     collector = GlassnodeCollector("fixture", client=client(lambda _: httpx.Response(200, json=[])))
     points = collector._fetch_metric("global_mvrv", DAY, DAY)
     assert len(points) == 1 and points[0].status == MetricStatus.MISSING
+
+
+@pytest.mark.parametrize("metric", ["realized_profit", "realized_loss", "glassnode_realized_cap_usd"])
+def test_glassnode_core5_plan_failure_is_explicit(metric):
+    collector = GlassnodeCollector("fixture", client=client(lambda _: httpx.Response(403)), retries=1)
+    point = collector._fetch_metric(metric, DAY, DAY)[0]
+    assert point.value is None and point.status == MetricStatus.UNAVAILABLE_PLAN
+    assert point.metadata["error"] == "HTTP 403"
 
 
 def test_glassnode_blank_key_performs_no_http_requests():

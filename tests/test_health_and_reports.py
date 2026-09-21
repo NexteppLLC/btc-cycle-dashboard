@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import json
 from types import SimpleNamespace
 
 from services.health_service import build_diagnostics
@@ -18,6 +19,7 @@ def test_paid_data_absence_does_not_fail_update():
     assert result["status"] == "degraded"
     assert result["essential_failures"] == []
     assert result["sources"]["GLD"]["status"] == "UNAVAILABLE_OR_STALE"
+    json.dumps(result)  # GitHub Actions writes the complete diagnostics payload.
 
 
 def test_stale_prices_fail_even_with_new_download_time():
@@ -52,6 +54,24 @@ def test_old_high_confidence_report_does_not_claim_current_market_phase():
     assert "判定保留 / PARTIAL" in text
     assert "期限切れ" in text
     assert "BTCの現在フェーズはMID_BULL" not in text
+
+
+def test_report_includes_core5_without_treating_missing_as_safe():
+    fields = dict.fromkeys(["btc_price", "mvrv_zscore", "lth_mvrv", "sth_mvrv", "lth_distribution",
+                           "etf_flow_1d", "etf_flow_7d"])
+    snapshot = SimpleNamespace(**fields, date=TODAY, cycle_phase="PARTIAL", confidence=25,
+                               cycle_score=None, top_risk_score=None, global_mvrv=1.32)
+    unavailable = {"current": None, "status": "UNAVAILABLE", "daily_change": None,
+                   "change_7d": None, "percentile_52w": None, "percentile_4y": None,
+                   "observation_date": None}
+    core5 = {"cards": {name: dict(unavailable) for name in (
+        "sth_mvrv", "sth_sopr", "lth_mvrv", "lth_distribution", "sell_side_risk")},
+        "short_term_health": "UNAVAILABLE", "cycle_heat": "UNAVAILABLE",
+        "distribution_pressure": "PARTIAL", "state": "PARTIAL", "alerts": []}
+    text = report_text(snapshot, core5=core5)
+    assert "## BTC Core 5" in text
+    assert "BTC 5-Signal State：**PARTIAL**" in text
+    assert "Sell-Side Risk：取得不可 / UNAVAILABLE" in text
 
 
 def test_etf_nav_alone_is_partial_not_healthy_holdings():

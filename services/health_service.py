@@ -7,7 +7,8 @@ from indicators.normalization import finite_number
 
 BTC_OPTIONAL_METRICS = ("lth_mvrv", "sth_mvrv", "mvrv_zscore", "lth_realized_price",
                         "sth_realized_price", "lth_sopr", "sth_sopr", "lth_supply",
-                        "sth_supply", "lth_spent_volume", "lth_realized_profit", "cdd", "etf_flow_usd")
+                        "sth_supply", "lth_spent_volume", "lth_realized_profit", "cdd", "etf_flow_usd",
+                        "realized_profit", "realized_loss", "glassnode_realized_cap_usd")
 
 
 def metric_diagnostic(metrics, name, as_of):
@@ -85,13 +86,39 @@ def build_diagnostics(metrics, cot, etfs, *, as_of=None, metric_points=0, etf_re
             warnings.append(f"{fund}: net assets available, but physical holdings/shares are missing")
     # Recheck decision inputs at display time: a recent saved score can depend
     # on observations that have since expired or failed to update.
-    from services.update_service import build_btc_inputs, btc_input_eligibility, load_thresholds
+    from services.update_service import build_btc_core5, build_btc_inputs, btc_input_eligibility, load_thresholds
     values, flow, coverage = build_btc_inputs(metrics, as_of)
-    eligibility = {"btc": btc_input_eligibility(values, flow, coverage, load_thresholds())}
+    thresholds = load_thresholds()
+    core5 = build_btc_core5(metrics, as_of, values.get("lth_distribution"), cfg=thresholds)
+    core5_diagnostics = {
+        **core5,
+        "cards": {
+            name: {**card, "observation_date": str(card["observation_date"])
+                   if card.get("observation_date") is not None else None}
+            for name, card in core5["cards"].items()
+        },
+    }
+    risk_card = core5["cards"]["sell_side_risk"]
+    if risk_card["current"] is not None:
+        sources["sell_side_risk"] = {
+            "status": "OK", "source": "CALCULATED_FROM_GLASSNODE_REALIZED_VALUES",
+            "effective_date": str(risk_card["observation_date"]), "reason": None,
+        }
+    else:
+        inputs = [sources[name] for name in ("realized_profit", "realized_loss", "glassnode_realized_cap_usd")]
+        priority = ("UNAVAILABLE_NO_API_KEY", "UNAVAILABLE_PLAN", "ERROR", "UNAVAILABLE", "STALE", "MISSING")
+        status = next((state for state in priority if any(item["status"] == state for item in inputs)), "MISSING")
+        sources["sell_side_risk"] = {
+            "status": status, "source": "CALCULATED_FROM_GLASSNODE_REALIZED_VALUES",
+            "effective_date": None,
+            "reason": "15日分の同日・同一プロバイダー入力が揃っていません",
+        }
+        warnings.append("BTC: Sell-Side Risk unavailable: aligned 15-day Glassnode inputs required")
+    eligibility = {"btc": btc_input_eligibility(values, flow, coverage, thresholds)}
     for asset in ("gold", "silver"):
         eligible = all(sources[f"{asset}_{suffix}"]["status"] == "OK" for suffix in ("price_usd", "cot"))
         eligibility[asset] = {"minimum_met": eligible}
     return {"as_of": as_of.isoformat(), "metric_points": metric_points, "etf_records": etf_records,
             "status": "error" if failures else "degraded" if warnings else "ok",
             "essential_failures": failures, "warnings": warnings, "sources": sources,
-            "phase_eligibility": eligibility}
+            "phase_eligibility": eligibility, "btc_core5": core5_diagnostics}
