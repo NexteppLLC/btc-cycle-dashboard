@@ -99,6 +99,12 @@ APIキーや、認証情報を含むCSV URLをコード・ログ・Issueへ貼�
 
 Cycle Score、Top Risk、Confidenceの閾値・重みは [`config/thresholds.yaml`](config/thresholds.yaml) にあります。欠損成分は利用可能成分へ再配分しますが、Confidenceと最低条件によって正式判定を制限します。低い参考Top Riskは「安全」を意味しません。
 
+Bitcoinタブ先頭の **BTC 5-Signal Monitor** は、STH-MVRV、STH-SOPR、LTH-MVRV、LTH Distribution、Sell-Side Risk Ratioの5系列を同じ観測日で確認する独立レイヤーです。既存のCycle Score、Top Risk、Phase、Confidenceの計算や重みには影響しません。Sell-Side RiskはGlassnodeの全体Realized Profit、全体Realized Loss、全体Realized Capの同一UTC timestampの実測値から `(Profit + Loss) / Realized Cap` を求め、欠損のない連続15暦日の単純平均を表示します。LTH限定値やCoin Metrics由来Realized Capへフォールバックしません。
+
+Core 5カードの差分は厳密な前日・7日前との比較です。52週Percentileは観測日を含む直近364暦日、Sell-Side Riskの4年Percentileは観測日から4暦年前まで（両端を含む）をmidrankで計算します。必要な全期間が連続して揃わなければ `INSUFFICIENT_HISTORY` のままです。Core 5の閾値は初期仮説であり、売買判断や利益を保証する基準ではありません。オンチェーン上の移動・分配を、取引所で確認された実際の売却量とは断定しません。
+
+総合Stateは5入力が新鮮で観測日が一致し、LTH Distributionの構成入力が既定で100%揃う場合だけ正式判定します。不足・期限切れ・日付不一致は `PARTIAL` です。一方、条件を実測値で確認できる個別アラートはPARTIAL時にも表示されます。Core 5専用の最低充足率は `btc_core5.distribution_minimum_coverage` で設定でき、既存スコア用の欠損時再ウェイトは変更しません。
+
 LTH Distributionは複数指標の合成値です。Confidenceへの寄与は実際に揃った構成データの割合に応じて計算します。例えばLTH-SOPRのみ取得できた場合、分配指標の25%が揃った扱いとなり、100%取得済みとはみなしません。ETFについても判定に使う7暦日合計が揃った場合に充足度へ計上します。
 
 保存時に高いConfidenceがあっても、表示時に主要観測値が期限切れ・取得失敗となっていれば現在フェーズは判定保留にします。Overview・Bitcoin・Compare・ダウンロードレポートは同じ条件を使い、過去の保存履歴はそのまま残します。金銀は価格に加えCFTC建玉の鮮度も必要です。

@@ -22,7 +22,10 @@ def create_schema(database_url: str | None = None) -> None:
     # create_all does not add columns to an existing SQLite database.  Keep the
     # deployed, user-owned history and apply this small backwards-compatible migration.
     additions = {
-        "metrics": {"asset": "VARCHAR(12)", "price_type": "VARCHAR(30)", "effective_date": "DATE", "error": "VARCHAR(500)"},
+        "metrics": {"asset": "VARCHAR(12)", "price_type": "VARCHAR(30)", "effective_date": "DATE", "error": "VARCHAR(500)",
+                    "unit": "VARCHAR(30)", "methodology": "VARCHAR(160)", "provider_timestamp": "VARCHAR(50)", "formula": "VARCHAR(240)"},
+        "daily_snapshot": {"lth_distribution_coverage": "FLOAT", "lth_distribution_observed_date": "DATE",
+                           "core5_state": "VARCHAR(30)", "core5_reason": "VARCHAR(500)"},
         "etf_holdings": {"effective_date": "DATE", "published_at": "DATETIME", "error": "VARCHAR(500)",
                          "physical_holdings": "FLOAT", "holdings_unit": "VARCHAR(20)", "net_assets": "FLOAT"},
     }

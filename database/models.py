@@ -23,6 +23,10 @@ class Metric(Base):
     price_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    methodology: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_timestamp: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    formula: Mapped[str | None] = mapped_column(String(240), nullable=True)
 
 
 class DailySnapshot(Base):
@@ -42,6 +46,10 @@ class DailySnapshot(Base):
     etf_flow_1d: Mapped[float | None] = mapped_column(Float)
     etf_flow_7d: Mapped[float | None] = mapped_column(Float)
     lth_distribution: Mapped[float | None] = mapped_column(Float)
+    lth_distribution_coverage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lth_distribution_observed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    core5_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    core5_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cycle_score: Mapped[float | None] = mapped_column(Float)
     top_risk_score: Mapped[float | None] = mapped_column(Float)
     cycle_phase: Mapped[str] = mapped_column(String(30), default="UNKNOWN")

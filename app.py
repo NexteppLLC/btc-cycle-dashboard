@@ -16,6 +16,8 @@ from services.data_quality import current_metric_row, metric_current, metric_ser
 from services.health_service import build_diagnostics
 from services.phase_service import phase_status
 from services.report_service import report_text
+from services.core5_service import build_core5
+from services.update_service import load_thresholds
 
 st.set_page_config(page_title="BTC Market Cycle", page_icon="₿", layout="wide")
 st.markdown("""<style>.stApp{background:#07111f;color:#edf2f7}.kpi{background:#111e30;border:1px solid #263850;border-radius:12px;padding:18px}.muted{color:#91a4ba}.status{font-size:1.15rem;font-weight:700}</style>""", unsafe_allow_html=True)
@@ -68,6 +70,7 @@ def latest_fund_rows(asset=None, fresh_only=False):
 
 snapshots, metrics, metal_snapshots, cot, etfs = load_data(); latest = snapshots[-1] if snapshots else None
 quality = build_diagnostics(metrics, cot, etfs)
+core5 = build_core5(metrics, snapshots, load_thresholds()["btc_core5"])
 with st.sidebar:
     st.header("データ更新")
     if st.button("最新の保存データを表示", key="reload_data"):
@@ -82,7 +85,8 @@ with st.sidebar:
                 with session_scope() as session:
                     repo = Repository(session)
                     updated_quality = build_diagnostics(repo.metrics(), repo.cot("gold") + repo.cot("silver"), repo.etf_holdings())
-                generate_report(result["snapshot"], metals=result["metals"], diagnostics=updated_quality)
+                generate_report(result["snapshot"], metals=result["metals"], diagnostics=updated_quality,
+                                core5=result["core5"])
                 load_data.clear()
                 st.rerun()
             except Exception as exc:
@@ -92,7 +96,7 @@ with st.sidebar:
         st.caption(f"保存済み集計日（UTC）：{latest['date']}")
         report_metals = {x["asset"]: x for x in metal_snapshots}
         st.download_button("日次レポートを保存", report_text(SimpleNamespace(**latest),
-                           metals=[SimpleNamespace(**m) for m in report_metals.values()], diagnostics=quality),
+                           metals=[SimpleNamespace(**m) for m in report_metals.values()], diagnostics=quality, core5=core5),
                            file_name=f"market-cycle-{latest['date']}.md", mime="text/markdown")
 st.title("₿ BTC MARKET CYCLE")
 st.caption("価格・オンチェーン・保有者行動・ETF需要を複合評価する分析支援ツール")
@@ -114,6 +118,7 @@ with tabs[0]:
         cols[2].metric("Cycle Score", f'{shown(latest["cycle_score"])} / 100{reference}')
         cols[3].metric("Top Risk", f'{shown(latest["top_risk_score"])} / 100{reference}')
         st.metric("Confidence（主要データ充足度）", f'{shown(latest["confidence"])}% · {confidence_label(latest["confidence"])}')
+        st.metric("BTC 5-Signal State", core5["state"], help="Cycle Scoreとは独立した日次保有者行動の観測レイヤーです。")
         if reference: st.error("判定保留：オンチェーン主要指標など、正式判定に必要な現在のデータが不足しています。")
         st.subheader("今日の重要変化")
         previous = snapshots[-2] if len(snapshots) > 1 else None
@@ -130,6 +135,48 @@ with tabs[0]:
 
 metric_df = pd.DataFrame(metrics)
 with tabs[1]:
+    st.header("BTC 5-Signal Monitor")
+    st.caption("Core 5は既存Cycle Scoreとは独立した観測レイヤーです。オンチェーン移動を取引所で確認された売却量とは断定しません。")
+    labels = {"sth_mvrv": "STH-MVRV", "sth_sopr": "STH-SOPR", "lth_mvrv": "LTH-MVRV",
+              "distribution": "LTH Distribution Score", "sell_side_risk": "Sell-Side Risk Ratio (15D SMA)"}
+    for col, key in zip(st.columns(5), labels):
+        card = core5["cards"][key]
+        ratio = key == "sell_side_risk"
+        value = f'{card["value"] * 100:.3f}%' if ratio and card["value"] is not None else shown(card["value"], ".3f")
+        delta = card["change_1d"]
+        delta_text = (f'1D {delta * 100:+.3f} pp' if ratio and delta is not None else
+                      f'1D {delta:+.3f}' if delta is not None else "1D 取得不可")
+        col.metric(labels[key], value, delta=delta_text)
+        pct = card["percentile_52w"]
+        extra = ""
+        if key == "sth_mvrv":
+            extra = f' · STH Realized Price {shown(metric_current(metrics, "sth_realized_price"))}'
+        if key == "distribution": extra += f' · 入力充足率 {card["coverage"]:.0%}'
+        col.caption(f'観測日 {card["date"] or "取得不可"} · Status {card["status"]}{extra}')
+        if card.get("reason"): col.caption(f'理由: {card["reason"]}')
+        if ratio:
+            percent = lambda item, suffix: "取得不可" if item is None else f"{item * 100:.3f}{suffix}"
+            prior1 = percent(card["previous_1d"], "%")
+            prior7 = percent(card["previous_7d"], "%")
+            change7 = percent(card["change_7d"], " pp")
+        else:
+            prior1, prior7, change7 = (shown(card[name], ".4f") for name in ("previous_1d", "previous_7d", "change_7d"))
+        col.caption(f'前日 {prior1} · 7日前 {prior7} · 7D差 {change7}')
+        col.caption(f'52週Percentile {shown(pct["value"] * 100 if pct["value"] is not None else None)}% · {pct["status"]} · {pct["count"]}/{pct["expected"]}日 ({pct["coverage"]:.0%})')
+        if ratio:
+            p4 = card["percentile_4y"]
+            col.caption(f'4年Percentile {shown(p4["value"] * 100 if p4["value"] is not None else None)}% · {p4["status"]} · {p4["count"]}/{p4["expected"]}日 ({p4["coverage"]:.0%})')
+    state_cols = st.columns(3)
+    state_cols[0].metric("Short-Term Health", core5["substates"]["short_term_health"])
+    state_cols[1].metric("Cycle Heat", core5["substates"]["cycle_heat"])
+    state_cols[2].metric("Distribution Pressure", core5["substates"]["distribution_pressure"])
+    st.subheader("BTC 5-Signal State")
+    st.metric("総合State", core5["state"])
+    if core5["reasons"]: st.warning(" / ".join(core5["reasons"]))
+    st.caption(f'比較観測日: {core5["observation_date"] or "不一致 / 取得不可"}。固定水準とPercentileは別々の根拠として評価します。初期閾値は売買や利益を保証しません。')
+    if core5["alerts"]:
+        st.subheader("Core 5 Alerts")
+        st.dataframe(pd.DataFrame(core5["alerts"]), hide_index=True, width="stretch")
     st.subheader("BTCデータの取得状況")
     btc_eligibility = quality["phase_eligibility"]["btc"]
     st.caption(f"現在のデータ充足度：{shown(btc_eligibility['confidence'])}% · "

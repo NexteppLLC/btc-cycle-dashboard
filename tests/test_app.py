@@ -32,6 +32,12 @@ def test_empty_database_has_working_update_controls(app_database):
     assert len(at.tabs) == 7
     assert at.button(key="reload_data").label == "最新の保存データを表示"
     assert at.button(key="collect_data").label == "データを取得・更新"
+    assert any(header.value == "BTC 5-Signal Monitor" for header in at.header)
+    core_labels = {"STH-MVRV", "STH-SOPR", "LTH-MVRV", "LTH Distribution Score",
+                   "Sell-Side Risk Ratio (15D SMA)", "Short-Term Health", "Cycle Heat",
+                   "Distribution Pressure", "総合State"}
+    assert core_labels <= {metric.label for metric in at.tabs[1].metric}
+    assert next(metric for metric in at.tabs[1].metric if metric.label == "総合State").value == "PARTIAL"
     at.button(key="reload_data").click().run(timeout=30)
     assert not at.exception
 

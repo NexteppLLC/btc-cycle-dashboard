@@ -46,6 +46,12 @@ confidence:
 minimum_data:
   phase_confidence: 50
   btc_major_required: 2
+btc_core5:
+  distribution_minimum_coverage: 1.0
+  sth_break_even: 1.0
+  lth_mvrv: {capitulation: 1.0, low_early: 2.0, high: 3.5, extreme: 5.0}
+  distribution: {low: 40, rising: 60, high: 70, extreme: 80}
+  sell_side_risk: {compression: 0.001, high: 0.0075, percentile_compression: 0.10, percentile_high: 0.90, percentile_extreme: 0.95}
 confidence_weights:
   btc: {price: 0.10, global_mvrv: 0.10, mvrv_zscore: 0.10, lth_mvrv: 0.15, sth_mvrv: 0.15, lth_distribution: 0.20, sopr: 0.10, etf: 0.05, trend: 0.05}
 metals:

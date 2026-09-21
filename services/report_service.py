@@ -11,7 +11,7 @@ def fmt(value, suffix="", digits=2):
     return "取得不可" if value is None or not isfinite(float(value)) else f"{value:,.{digits}f}{suffix}"
 
 
-def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
+def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
     as_of = date.fromisoformat(diagnostics["as_of"]) if diagnostics else datetime.now(timezone.utc).date()
     status = phase_status(snapshot.cycle_phase, snapshot.confidence, snapshot.date,
                           diagnostics=diagnostics, as_of=as_of)
@@ -36,7 +36,27 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
 - LTH Distribution：{fmt(snapshot.lth_distribution)} / 100
 - ETF 最新観測フロー：{fmt(snapshot.etf_flow_1d, ' USD')}
 - ETF 最新観測日を含む7暦日合計：{fmt(snapshot.etf_flow_7d, ' USD')}
-
+"""
+    if core5:
+        labels = {"sth_mvrv": "STH-MVRV", "sth_sopr": "STH-SOPR", "lth_mvrv": "LTH-MVRV",
+                  "distribution": "LTH Distribution", "sell_side_risk": "Sell-Side Risk 15日SMA"}
+        text += "\n## BTC 5-Signal Monitor\n"
+        for key, label in labels.items():
+            card = core5["cards"][key]
+            value = fmt(card["value"] * 100, "%", 3) if key == "sell_side_risk" and card["value"] is not None else fmt(card["value"], digits=3)
+            reason = f' · 理由 {card["reason"]}' if card.get("reason") else ""
+            text += f'- {label}：{value} · 観測日 {card["date"] or "取得不可"} · Status {card["status"]}{reason}\n'
+        text += f'- Short-Term Health：{core5["substates"]["short_term_health"]}\n'
+        text += f'- Cycle Heat：{core5["substates"]["cycle_heat"]}\n'
+        text += f'- Distribution Pressure：{core5["substates"]["distribution_pressure"]}\n'
+        text += f'- BTC 5-Signal State：{core5["state"]}\n'
+        text += f'- 判定理由：{" / ".join(core5["reasons"]) or "必要入力を確認済み"}\n'
+        if core5["alerts"]:
+            text += "\n### Core 5 Alerts\n"
+            for alert in core5["alerts"]:
+                text += f'- {alert["id"]} · {alert["severity"]} · 観測日 {alert["observation_date"]} · {alert["reason"]}\n'
+        text += "\nCore 5は既存スコアと独立した観測レイヤーです。オンチェーン移動は取引所で確認された売却量を意味しません。\n"
+    text += """
 ## 本日の解釈
 """
     if partial:
@@ -71,11 +91,11 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
     return text
 
 
-def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None) -> Path:
+def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None, core5=None) -> Path:
     root = output_root or ROOT / "reports"
     archive = root / "archive"
     archive.mkdir(parents=True, exist_ok=True)
-    text = report_text(snapshot, metals=metals, diagnostics=diagnostics)
+    text = report_text(snapshot, metals=metals, diagnostics=diagnostics, core5=core5)
     latest = root / "latest.md"
     latest.write_text(text, encoding="utf-8")
     (archive / f"{snapshot.date}.md").write_text(text, encoding="utf-8")
