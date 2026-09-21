@@ -13,7 +13,7 @@ from indicators.normalization import finite_number
 
 
 MAX_AGE_DAYS = {"btc_price_usd": 3, "gold_price_usd": 5, "silver_price_usd": 5,
-                "etf_flow_usd": 5}
+                "etf_flow_usd": 5, "sell_side_risk_15d": 3}
 
 
 def field(row: Any, name: str, default=None):
@@ -44,8 +44,10 @@ def observation_date(row) -> date | None:
 def _source_key(row) -> tuple[str, str]:
     source = str(field(row, "source", ""))
     if source in {"Glassnode availability", "Glassnode API v1 availability",
-                  "CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV availability"}:
+                  "CALCULATED_FROM_GLASSNODE_PRICE_LTH_MVRV availability",
+                  "Glassnode API v1 Sell-Side Risk availability"}:
         source = source.removesuffix(" availability")
+        source = source.removesuffix(" Sell-Side Risk")
     # Older databases saved Glassnode failures under an alias different from
     # measured values. Group both identities so failures cannot be bypassed by
     # selecting the same provider's previous successful observation.

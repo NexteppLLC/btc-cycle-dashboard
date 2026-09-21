@@ -19,7 +19,9 @@ class Repository:
             if isinstance(effective_date, str): effective_date = date.fromisoformat(effective_date)
             values = {**key, "timestamp": point.timestamp, "value": point.value, "status": point.status.value, "fetched_at": point.fetched_at,
                       "asset": point.metadata.get("asset"), "price_type": point.metadata.get("price_type"),
-                      "effective_date": effective_date, "error": point.metadata.get("error")}
+                      "effective_date": effective_date, "error": point.metadata.get("error"),
+                      "unit": point.metadata.get("unit"), "methodology": point.metadata.get("methodology"),
+                      "provider_timestamp": point.metadata.get("provider_timestamp"), "formula": point.metadata.get("formula")}
             if row:
                 for name, value in values.items(): setattr(row, name, value)
             else: self.session.add(Metric(**values))

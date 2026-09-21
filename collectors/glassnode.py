@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import math
 
 from .base import HTTPCollector, MetricPoint, MetricStatus, unavailable
+from indicators.btc_core import calendar_sma, sell_side_raw
 
 
 class GlassnodeCollector(HTTPCollector):
@@ -28,6 +29,11 @@ class GlassnodeCollector(HTTPCollector):
         "cdd": "indicators/cdd",
         "dormancy": "indicators/average_dormancy",
     }
+    SELL_SIDE_ENDPOINTS = {
+        "sell_side_realized_profit_usd": "indicators/realized_profit",
+        "sell_side_realized_loss_usd": "indicators/realized_loss",
+        "sell_side_realized_cap_usd": "market/marketcap_realized_usd",
+    }
 
     def __init__(self, api_key: str | None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,7 +44,10 @@ class GlassnodeCollector(HTTPCollector):
             return [self._unavailable(metric, MetricStatus.UNAVAILABLE_NO_API_KEY)]
         endpoint = endpoint or self.ENDPOINTS[metric]
         try:
-            rows = self._get_json(f"{self.BASE}/{endpoint}", params={"a": "BTC", "api_key": self.api_key, "i": "24h", "s": int(datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc).timestamp()), "u": int(datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc).timestamp())})
+            params = {"a": "BTC", "api_key": self.api_key, "i": "24h", "s": int(datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc).timestamp()), "u": int(datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc).timestamp())}
+            if metric in self.SELL_SIDE_ENDPOINTS:
+                params["c"] = "USD"
+            rows = self._get_json(f"{self.BASE}/{endpoint}", params=params)
             if not isinstance(rows, list):
                 raise ValueError("Invalid Glassnode response schema")
             fetched = datetime.now(timezone.utc)
@@ -53,6 +62,9 @@ class GlassnodeCollector(HTTPCollector):
                 value = None
                 status = MetricStatus.MISSING
                 metadata = {"asset": "BTC", "provider_metric": endpoint}
+                if metric in self.SELL_SIDE_ENDPOINTS:
+                    metadata.update({"unit": "USD", "methodology": "GLASSNODE_NETWORK_REALIZED_VALUE",
+                                     "provider_timestamp": timestamp.isoformat()})
                 if "entity_adjusted" in endpoint or "account_based" in endpoint:
                     metadata["methodology"] = "ENTITY_ADJUSTED"
                 if row.get("v") not in (None, ""):
@@ -89,6 +101,10 @@ class GlassnodeCollector(HTTPCollector):
         if start_date > end_date:
             raise ValueError("start_date must not be after end_date")
         points = [point for metric in self.ENDPOINTS for point in self._fetch_metric(metric, start_date, end_date)]
+        sell_inputs = [point for metric, endpoint in self.SELL_SIDE_ENDPOINTS.items()
+                       for point in self._fetch_metric(metric, start_date - timedelta(days=14), end_date, endpoint=endpoint)]
+        points.extend(sell_inputs)
+        points.extend(self._sell_side_points(sell_inputs, start_date, end_date))
         # The current market catalog has STH realized price but no LTH price
         # endpoint. Recover the latter only from same-provider, same-timestamp
         # measured price and LTH MVRV (an arithmetic identity).
@@ -134,6 +150,57 @@ class GlassnodeCollector(HTTPCollector):
                 status = lth_points[-1].status
             derived = [self._unavailable("lth_realized_price", status)]
         return points + derived
+
+    def _sell_side_points(self, inputs, start_date, end_date):
+        """Derive only exact-timestamp, same-provider, confirmed UTC daily values."""
+        by_metric = {name: {} for name in self.SELL_SIDE_ENDPOINTS}
+        diagnostics = []
+        for point in inputs:
+            if point.status == MetricStatus.OK and point.value is not None:
+                by_metric[point.metric_name][point.timestamp] = point
+            elif point.timestamp.date() >= start_date:
+                diagnostics.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp,
+                    value=None, source=f"{self.SOURCE} Sell-Side Risk availability", fetched_at=point.fetched_at,
+                    status=point.status, metadata={"asset": "BTC", "error": point.metadata.get("error", "Sell-Side input unavailable")}))
+        raw = {}
+        raw_points = []
+        # The UTC day in progress is not a confirmed daily observation.
+        confirmed_before = datetime.now(timezone.utc).date()
+        timestamps = set.intersection(*(set(rows) for rows in by_metric.values())) if by_metric else set()
+        for timestamp in sorted(timestamps):
+            if timestamp.date() >= confirmed_before:
+                continue
+            triplet = [by_metric[name][timestamp] for name in self.SELL_SIDE_ENDPOINTS]
+            if any(p.source != self.SOURCE or p.metadata.get("asset") != "BTC" or
+                   p.metadata.get("unit") != "USD" or
+                   p.metadata.get("methodology") != "GLASSNODE_NETWORK_REALIZED_VALUE" for p in triplet):
+                continue
+            value = sell_side_raw(*(p.value for p in triplet))
+            if value is None:
+                continue
+            raw[timestamp.date()] = value
+            raw_points.append(MetricPoint(metric_name="sell_side_risk_raw", timestamp=timestamp, value=value,
+                source=self.SOURCE, fetched_at=max(p.fetched_at for p in triplet), status=MetricStatus.OK,
+                metadata={"asset": "BTC", "unit": "ratio", "methodology": "(realized_profit_usd + realized_loss_usd) / realized_cap_usd",
+                          "formula": "(profit + loss) / realized_cap", "provider_timestamp": timestamp.isoformat(),
+                          "input_metrics": list(self.SELL_SIDE_ENDPOINTS)}))
+        derived = list(raw_points)
+        for point in raw_points:
+            if point.timestamp.date() < start_date or point.timestamp.date() > end_date:
+                continue
+            value = calendar_sma(raw, point.timestamp.date(), 15)
+            if value is not None:
+                derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp, value=value,
+                    source=self.SOURCE, fetched_at=point.fetched_at, status=MetricStatus.OK,
+                    metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
+                              "formula": "SMA15(sell_side_risk_raw)", "provider_timestamp": point.timestamp.isoformat()}))
+        if not any(p.metric_name == "sell_side_risk_15d" and p.status == MetricStatus.OK for p in derived):
+            if diagnostics:
+                derived.append(max(diagnostics, key=lambda p: p.fetched_at))
+            else:
+                status = MetricStatus.UNAVAILABLE_NO_API_KEY if not self.api_key else MetricStatus.MISSING
+                derived.append(self._unavailable("sell_side_risk_15d", status))
+        return derived
 
     def fetch_latest(self) -> list[MetricPoint]:
         today = datetime.now(timezone.utc).date()

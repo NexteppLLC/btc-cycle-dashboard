@@ -23,7 +23,8 @@ from scoring.cycle_score import calculate_cycle_score
 from scoring.regime import btc_minimum_data, classify_phase, weighted_confidence
 from scoring.top_risk import calculate_top_risk
 from scoring.metals import calculate_metals_scores, percentile, position_statistics
-from services.data_quality import as_date, field, metric_current, metric_series, observation_date
+from services.data_quality import as_date, current_metric_row, field, metric_current, metric_series, observation_date
+from services.core5_service import build_core5
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +78,18 @@ def build_btc_inputs(rows, end):
     # Network-wide CDD alone cannot establish long-term-holder distribution.
     cohort_available = any(v is not None for k, v in distribution_inputs.items() if k != "cdd_z")
     distribution, coverage = distribution_score(distribution_inputs) if cohort_available else (None, 0.0)
+    component_names = [name for name, value in (("lth_sopr", distribution_inputs["lth_sopr"]),
+                       ("lth_spent_volume", distribution_inputs["lth_spent_volume_z"]),
+                       ("lth_realized_profit", distribution_inputs["lth_realized_profit_z"]),
+                       ("lth_supply", distribution_inputs["lth_supply_change_pct"]),
+                       ("cdd", distribution_inputs["cdd_z"])) if value is not None]
+    component_dates = {observation_date(current_metric_row(rows, name, end))
+                       for name in component_names}
+    distribution_day = next(iter(component_dates)) if len(component_dates) == 1 else None
     ma = current_tech.get("ma_200")
     deviation = current_tech["price"] / ma - 1 if ma is not None and ma > 0 else None
     values = {**latest, "global_mvrv": latest.get("global_mvrv"), "lth_distribution": distribution,
+              "lth_distribution_observed_date": distribution_day,
               "etf_flow": flow["7d"], "btc_trend": current_tech.get("return_30d"), "trend_deviation": deviation}
     state = sth_state(values)
     values["sth_state"] = 100 if state == "RECOVERY_CONFIRMATION" else 0 if state == "STH_STRESS" else None
@@ -233,8 +243,14 @@ def run_update(days: int = 1500) -> dict:
         snapshot_values = {name: values.get(name) for name in ("global_mvrv", "mvrv_zscore", "lth_mvrv", "sth_mvrv",
                            "lth_realized_price", "sth_realized_price", "lth_sopr", "sth_sopr", "lth_spent_volume", "sth_spent_volume", "lth_distribution")}
         snapshot = repo.upsert_snapshot({**snapshot_values, "date": end, "btc_price": values.get("btc_price_usd"),
+                                        "lth_distribution_coverage": dist_coverage,
+                                        "lth_distribution_observed_date": values.get("lth_distribution_observed_date"),
                                         "etf_flow_1d": flow["today"], "etf_flow_7d": flow["7d"], "cycle_score": cycle.score,
                                         "top_risk_score": top.score, "cycle_phase": phase, "confidence": confidence})
+        session.flush()
+        core5 = build_core5(rows, repo.snapshots(), cfg["btc_core5"], end)
+        snapshot.core5_state = core5["state"]
+        snapshot.core5_reason = "; ".join(core5["reasons"])
         repo.replace_scoring_details(end, cycle.details + top.details)
         metal_snapshots = []
         for asset in ("gold", "silver"):
@@ -250,4 +266,4 @@ def run_update(days: int = 1500) -> dict:
                                    "demand_score": scores.demand, "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality,
                                    "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
         return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points),
-                "etf_records": etf_saved, "distribution_coverage": dist_coverage}
+                "etf_records": etf_saved, "distribution_coverage": dist_coverage, "core5": core5}

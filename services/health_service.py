@@ -8,6 +8,7 @@ from indicators.normalization import finite_number
 BTC_OPTIONAL_METRICS = ("lth_mvrv", "sth_mvrv", "mvrv_zscore", "lth_realized_price",
                         "sth_realized_price", "lth_sopr", "sth_sopr", "lth_supply",
                         "sth_supply", "lth_spent_volume", "lth_realized_profit", "cdd", "etf_flow_usd")
+BTC_OPTIONAL_METRICS += ("sell_side_risk_15d",)
 
 
 def metric_diagnostic(metrics, name, as_of):
@@ -87,7 +88,8 @@ def build_diagnostics(metrics, cot, etfs, *, as_of=None, metric_points=0, etf_re
     # on observations that have since expired or failed to update.
     from services.update_service import build_btc_inputs, btc_input_eligibility, load_thresholds
     values, flow, coverage = build_btc_inputs(metrics, as_of)
-    eligibility = {"btc": btc_input_eligibility(values, flow, coverage, load_thresholds())}
+    cfg = load_thresholds()
+    eligibility = {"btc": btc_input_eligibility(values, flow, coverage, cfg)}
     for asset in ("gold", "silver"):
         eligible = all(sources[f"{asset}_{suffix}"]["status"] == "OK" for suffix in ("price_usd", "cot"))
         eligibility[asset] = {"minimum_met": eligible}
