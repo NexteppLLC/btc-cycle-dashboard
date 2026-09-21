@@ -11,8 +11,9 @@ def fmt(value, suffix="", digits=2):
     return "取得不可" if value is None or not isfinite(float(value)) else f"{value:,.{digits}f}{suffix}"
 
 
-def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
+def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
     as_of = date.fromisoformat(diagnostics["as_of"]) if diagnostics else datetime.now(timezone.utc).date()
+    core5 = core5 or (diagnostics or {}).get("btc_core5")
     status = phase_status(snapshot.cycle_phase, snapshot.confidence, snapshot.date,
                           diagnostics=diagnostics, as_of=as_of)
     stale, partial = status.stale, status.partial
@@ -36,9 +37,27 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
 - LTH Distribution：{fmt(snapshot.lth_distribution)} / 100
 - ETF 最新観測フロー：{fmt(snapshot.etf_flow_1d, ' USD')}
 - ETF 最新観測日を含む7暦日合計：{fmt(snapshot.etf_flow_7d, ' USD')}
-
-## 本日の解釈
 """
+    if core5:
+        cards = core5["cards"]
+        risk = cards["sell_side_risk"]["current"]
+        risk_text = fmt(None if risk is None else risk * 100, "%", 3)
+        text += f"""
+
+## BTC Core 5
+- STH-MVRV：{fmt(cards['sth_mvrv']['current'])} / {cards['sth_mvrv']['status']}
+- STH-SOPR：{fmt(cards['sth_sopr']['current'])} / {cards['sth_sopr']['status']}
+- LTH-MVRV：{fmt(cards['lth_mvrv']['current'])} / {cards['lth_mvrv']['status']}
+- LTH Distribution：{fmt(cards['lth_distribution']['current'])} / {cards['lth_distribution']['status']}
+- Sell-Side Risk：{risk_text} / {cards['sell_side_risk']['status']}
+- Short-Term Health：{core5['short_term_health']}
+- Cycle Heat：{core5['cycle_heat']}
+- Distribution Pressure：{core5['distribution_pressure']}
+- BTC 5-Signal State：**{core5['state']}**
+"""
+        if core5.get("alerts"):
+            text += "- Alerts：" + "、".join(core5["alerts"]) + "\n"
+    text += "\n## 本日の解釈\n"
     if partial:
         text += "主要指標が不足しているため、BTCのサイクル判定を保留します。表示スコアは利用可能なデータのみの参考値です。低いTop Riskを安全の根拠として扱いません。\n"
     else:
@@ -71,11 +90,11 @@ def report_text(snapshot, *, metals=(), diagnostics=None) -> str:
     return text
 
 
-def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None) -> Path:
+def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None, core5=None) -> Path:
     root = output_root or ROOT / "reports"
     archive = root / "archive"
     archive.mkdir(parents=True, exist_ok=True)
-    text = report_text(snapshot, metals=metals, diagnostics=diagnostics)
+    text = report_text(snapshot, metals=metals, diagnostics=diagnostics, core5=core5)
     latest = root / "latest.md"
     latest.write_text(text, encoding="utf-8")
     (archive / f"{snapshot.date}.md").write_text(text, encoding="utf-8")

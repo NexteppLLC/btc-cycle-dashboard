@@ -46,7 +46,8 @@ def test_all_holder_and_score_cards_are_visible(app_database):
     assert not at.exception
     labels = [m.label for m in at.metric]
     # Regression: zip(st.columns(4), eight_items) silently hid the second row.
-    for label in ("Phase", "Confidence", "lth_supply", "sth_supply", "cdd"):
+    for label in ("Phase", "Confidence", "lth_supply", "sth_supply", "cdd",
+                  "Core 5", "STH-SOPR", "Sell-Side Risk", "BTC 5-Signal State"):
         assert label in labels
     assert [m.value for m in at.metric if m.label == "cdd"] == ["取得不可"]
     compare = [df.value for df in at.dataframe if "asset" in df.value.columns]
