@@ -48,9 +48,9 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - 保存済み集計日（UTC）：2026-09-21
 - 価格：66.56 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：DISTRIBUTION / 分配局面
-- Institutional Demand：57.40 / 100
+- Institutional Demand：62.40 / 100
 - Top Risk：37.90 / 100
-- Dip Quality：42.10 / 100
+- Dip Quality：45.90 / 100
 - Confidence：100.0%
 
 ## データの状態
@@ -77,8 +77,8 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - gold_cot：OK
 - silver_cot：OK
 - GLD：OK · 2026-09-18
-- IAU：OK · 2026-09-18
-- SLV：OK · 2026-09-18
+- IAU：OK · 2026-09-21
+- SLV：OK · 2026-09-21
 
 市場指標はそれぞれの観測日が基準です。CFTCは週次、ETF保有量はスポンサー公表日を使用します。
 
