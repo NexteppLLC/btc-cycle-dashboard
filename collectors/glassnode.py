@@ -162,6 +162,17 @@ class GlassnodeCollector(HTTPCollector):
                 request_diagnostics.append(point)
             else:
                 by_metric[point.metric_name].setdefault(point.timestamp.date(), []).append(point)
+        # A request-level failure says nothing about any individual historical
+        # observation.  Do not synthesize dated MISSING rows for the requested
+        # range: they would overwrite valid history.  Persist one separate,
+        # fetch-time diagnostic so current selection is blocked until a later
+        # successful request recovers the provider.
+        if request_diagnostics:
+            point = max(request_diagnostics, key=lambda p: p.fetched_at)
+            return [MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp, value=None,
+                source=f"{self.SOURCE} Sell-Side Risk availability", fetched_at=point.fetched_at, status=point.status,
+                metadata={"asset": "BTC", "unit": "ratio", "methodology": None,
+                          "error": point.metadata.get("error", "Sell-Side input request unavailable")})]
         raw = {}
         raw_points = []
         # The UTC day in progress is not a confirmed daily observation.
@@ -214,13 +225,7 @@ class GlassnodeCollector(HTTPCollector):
                     metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
                               "formula": "SMA15(sell_side_risk_raw)", "provider_timestamp": timestamp.isoformat(),
                               "error": "連続15暦日の有効なSell-Side raw入力が揃っていません"}))
-        if request_diagnostics:
-            point = max(request_diagnostics, key=lambda p: p.fetched_at)
-            derived.append(MetricPoint(metric_name="sell_side_risk_15d", timestamp=point.timestamp, value=None,
-                source=f"{self.SOURCE} Sell-Side Risk availability", fetched_at=point.fetched_at, status=point.status,
-                metadata={"asset": "BTC", "unit": "ratio", "methodology": "15_calendar_day_simple_moving_average",
-                          "error": point.metadata.get("error", "Sell-Side input unavailable")}))
-        elif not any(p.metric_name == "sell_side_risk_15d" for p in derived):
+        if not any(p.metric_name == "sell_side_risk_15d" for p in derived):
             status = MetricStatus.UNAVAILABLE_NO_API_KEY if not self.api_key else MetricStatus.MISSING
             point = self._unavailable("sell_side_risk_15d", status)
             point.metadata.update({"unit": "ratio", "methodology": "15_calendar_day_simple_moving_average"})

@@ -14,6 +14,7 @@ from database.repository import Repository
 from database.session import create_schema, session_scope
 from database.models import Metric
 from types import SimpleNamespace
+from services.data_quality import latest_metric_record, metric_current, selected_metric_rows
 
 
 DAY = date(2026, 9, 20)
@@ -282,3 +283,97 @@ def test_sell_side_missing_overwrites_saved_current_value_and_recovery_restores_
             metric_name="sell_side_risk_15d", date=DAY).one()
         assert row.status == "OK" and row.value == pytest.approx(.003)
         assert build_core5(Repository(session).metrics(), [], CORE_CFG, DAY)["cards"]["sell_side_risk"]["value"] == pytest.approx(.003)
+
+
+@pytest.mark.parametrize(("failed_inputs", "status", "failure_reason"), [
+    ({"sell_side_realized_profit_usd"}, MetricStatus.UNAVAILABLE_PLAN, "HTTP 403"),
+    (set(GlassnodeCollector.SELL_SIDE_ENDPOINTS), MetricStatus.UNAVAILABLE_PLAN, "HTTP 401"),
+    (set(GlassnodeCollector.SELL_SIDE_ENDPOINTS), MetricStatus.UNAVAILABLE_NO_API_KEY, "API key missing"),
+])
+def test_sell_side_request_failure_preserves_history_blocks_current_and_recovers(
+        tmp_path, failed_inputs, status, failure_reason):
+    """Request failures are fetch diagnostics, not historical missing cells."""
+    url = f"sqlite:///{tmp_path / 'request-failure.db'}"
+    create_schema(url)
+    collector = GlassnodeCollector("fixture")
+    names = list(collector.SELL_SIDE_ENDPOINTS)
+    start = DAY - timedelta(days=2)
+    raw_start = start - timedelta(days=14)
+
+    def successful(fetched_at):
+        result = []
+        for offset in range((DAY - raw_start).days + 1):
+            day = raw_start + timedelta(days=offset)
+            stamp = datetime.combine(day, datetime.min.time(), timezone.utc)
+            for name, value in zip(names, (2, 1, 1000)):
+                result.append(point(name, value, stamp).model_copy(update={"fetched_at": fetched_at}))
+        return result
+
+    initial = collector._sell_side_points(successful(STAMP + timedelta(hours=1)), start, DAY)
+    with session_scope(url) as session:
+        Repository(session).upsert_metrics(initial)
+
+    failure_time = STAMP + timedelta(hours=2)
+    failed = []
+    for name in names:
+        if name in failed_inputs:
+            diagnostic = collector._unavailable(name, status)
+            diagnostic.timestamp = diagnostic.fetched_at = failure_time
+            diagnostic.metadata["error"] = failure_reason
+            failed.append(diagnostic)
+        else:
+            failed.extend([p for p in successful(failure_time) if p.metric_name == name])
+    request_result = collector._sell_side_points(failed, start, DAY)
+    assert len(request_result) == 1
+    assert request_result[0].source.endswith("availability")
+    with session_scope(url) as session:
+        repo = Repository(session)
+        repo.upsert_metrics(request_result)
+    with session_scope(url) as session:
+        rows = Repository(session).metrics()
+        saved = [row for row in rows if row.metric_name == "sell_side_risk_15d"
+                 and row.source == collector.SOURCE and start <= row.date <= DAY]
+        assert len(saved) == 3 and all(row.status == "OK" and row.value == pytest.approx(.003) for row in saved)
+        assert len(selected_metric_rows(rows, "sell_side_risk_15d", DAY)) == 3
+        assert metric_current(rows, "sell_side_risk_15d", DAY) is None
+        assert latest_metric_record(rows, "sell_side_risk_15d", DAY).status == status.value
+
+    recovery = collector._sell_side_points(successful(STAMP + timedelta(hours=3)), start, DAY)
+    with session_scope(url) as session:
+        Repository(session).upsert_metrics(recovery)
+    with session_scope(url) as session:
+        rows = Repository(session).metrics()
+        assert metric_current(rows, "sell_side_risk_15d", DAY) == pytest.approx(.003)
+        assert latest_metric_record(rows, "sell_side_risk_15d", DAY).status == "OK"
+
+
+@pytest.mark.parametrize("status", [MetricStatus.UNAVAILABLE_PLAN, MetricStatus.UNAVAILABLE_NO_API_KEY])
+def test_methodology_independent_request_failure_blocks_current_and_recovers(tmp_path, status):
+    url = f"sqlite:///{tmp_path / f'methodology-{status.value}.db'}"
+    create_schema(url)
+    collector = GlassnodeCollector("fixture")
+    measured = point("lth_spent_volume", 2).model_copy(update={
+        "fetched_at": STAMP + timedelta(hours=1),
+        "metadata": {"asset": "BTC", "methodology": "ENTITY_ADJUSTED"}})
+    with session_scope(url) as session:
+        Repository(session).upsert_metrics([measured])
+
+    diagnostic = collector._unavailable("lth_spent_volume", status)
+    diagnostic.timestamp = diagnostic.fetched_at = STAMP + timedelta(hours=2)
+    diagnostic.metadata["error"] = "HTTP 401/403" if status == MetricStatus.UNAVAILABLE_PLAN else "API key missing"
+    with session_scope(url) as session:
+        Repository(session).upsert_metrics([diagnostic])
+    with session_scope(url) as session:
+        rows = Repository(session).metrics()
+        assert metric_current(rows, "lth_spent_volume", DAY) is None
+        assert latest_metric_record(rows, "lth_spent_volume", DAY).status == status.value
+        history = selected_metric_rows(rows, "lth_spent_volume", DAY)
+        assert len(history) == 1 and history[0].value == 2
+
+    recovered = measured.model_copy(update={"value": 3, "fetched_at": STAMP + timedelta(hours=3)})
+    with session_scope(url) as session:
+        Repository(session).upsert_metrics([recovered])
+    with session_scope(url) as session:
+        rows = Repository(session).metrics()
+        assert metric_current(rows, "lth_spent_volume", DAY) == 3
+        assert latest_metric_record(rows, "lth_spent_volume", DAY).status == "OK"

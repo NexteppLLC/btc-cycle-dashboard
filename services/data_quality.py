@@ -119,8 +119,30 @@ def _provider_rows(rows, metric_name, as_of, *, include_request_diagnostics=True
     return groups
 
 
-def _selected_provider(rows, metric_name, as_of):
+def _selected_provider(rows, metric_name, as_of, *, honor_request_failures=True):
     groups = _provider_rows(rows, metric_name, as_of)
+    if honor_request_failures and groups:
+        # Methodology is part of a historical series, but a provider request
+        # failure is provider-wide.  A diagnostic newer than every successful
+        # methodology blocks all of that provider's current candidates.  The
+        # measured groups remain untouched for chart/history reads below.
+        diagnostics, successes = {}, {}
+        for key, dated in groups.items():
+            provider = key[:2]
+            for row in dated.values():
+                fetched = _fetched_key(row)
+                if _is_request_diagnostic(row):
+                    if fetched >= diagnostics.get(provider, ("", None))[0]:
+                        diagnostics[provider] = (fetched, row)
+                elif _is_measured(row):
+                    successes[provider] = max(successes.get(provider, ""), fetched)
+        blocked = {provider: item for provider, item in diagnostics.items()
+                   if item[0] >= successes.get(provider, "")}
+        if blocked:
+            groups = {key: dated for key, dated in groups.items() if key[:2] not in blocked}
+            for provider, (_, row) in blocked.items():
+                groups[(provider[0], provider[1], "__REQUEST_FAILURE__")] = {
+                    observation_date(row): row}
     candidates = []
     for key, dated in groups.items():
         usable = [day for day, row in dated.items() if _is_measured(row)]
@@ -146,7 +168,7 @@ def _selected_provider(rows, metric_name, as_of):
 def selected_metric_rows(rows, metric_name: str, as_of: date | None = None) -> list:
     """Measured chart history; request failures cannot erase an observation."""
     as_of = as_of or datetime.now(timezone.utc).date()
-    dated = _selected_provider(rows, metric_name, as_of)
+    dated = _selected_provider(rows, metric_name, as_of, honor_request_failures=False)
     if not dated:
         return []
     key = _source_key(dated[max(dated)])
@@ -168,7 +190,7 @@ def latest_metric_record(rows, metric_name: str, as_of: date | None = None):
 def metric_series(rows, metric_name: str, as_of: date | None = None) -> pd.Series:
     """Single-provider dated history; explicit missing observations remain NaN."""
     as_of = as_of or datetime.now(timezone.utc).date()
-    dated = _selected_provider(rows, metric_name, as_of)
+    dated = _selected_provider(rows, metric_name, as_of, honor_request_failures=False)
     return pd.Series({day: finite_number(field(dated[day], "value")) if _is_measured(dated[day]) else None
                       for day in sorted(dated)}, dtype=float)
 
