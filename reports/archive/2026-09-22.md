@@ -2,18 +2,18 @@
 
 保存済み集計日（UTC）：2026-09-22
 判定確認日（UTC）：2026-09-22
-レポート生成（JST）：2026-09-22 17:27
+レポート生成（JST）：2026-09-23 07:49
 
 | 資産 | 最新価格 | 観測時刻 | 24h | 前回レポート比 | 相場局面 | Confidence |
 |---|---:|---|---:|---:|---|---:|
-| BTC | $85,429.00 USD | 2026-09-22 17:27 JST | -1.35% | 取得不可 | PARTIAL | 25.0% |
-| GOLD | $4,338.30 USD / troy oz (FUTURES_PROXY) | 2026-09-22 17:17 JST | -1.04% | 取得不可 | DISTRIBUTION | 100.0% |
-| SILVER | $65.36 USD / troy oz (FUTURES_PROXY) | 2026-09-22 17:17 JST | -1.60% | 取得不可 | DISTRIBUTION | 100.0% |
+| BTC | $86,170.40 USD | 2026-09-23 07:49 JST | -0.49% | 0.87% | PARTIAL | 25.0% |
+| GOLD | $4,402.60 USD / troy oz (FUTURES_PROXY) | 2026-09-23 07:39 JST | 0.60% | 1.48% | DISTRIBUTION | 100.0% |
+| SILVER | $67.80 USD / troy oz (FUTURES_PROXY) | 2026-09-23 07:39 JST | 1.90% | 3.73% | DISTRIBUTION | 100.0% |
 
 
 ## Bitcoin
-- Latest：85,429.00 USD
-- Observed：2026-09-22 17:27 JST
+- Latest：86,170.40 USD
+- Observed：2026-09-23 07:49 JST
 - Source：Kraken Public Ticker
 - Symbol / Type：XBT/USD / SPOT
 - Freshness：FRESH（age 0.0 min）
@@ -52,11 +52,11 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 取得不可の指標は推測・ゼロ補完しません。LTH/STHなどの契約制限は、無料モードでは取得不可として明示します。
 
 ## Gold
-- Latest：4,338.30 USD / troy oz
-- Observed：2026-09-22 17:17 JST
+- Latest：4,402.60 USD / troy oz
+- Observed：2026-09-23 07:39 JST
 - Source：Yahoo Finance GC=F intraday (query1)
 - Symbol / Type：GC=F / FUTURES_PROXY
-- Freshness：FRESH（age 10.0 min）
+- Freshness：FRESH（age 10.2 min）
 - Market State：UNKNOWN
 - Previous completed daily close：4,383.90 USD
 
@@ -69,20 +69,20 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - Confidence：100.0%
 
 ## Silver
-- Latest：65.36 USD / troy oz
-- Observed：2026-09-22 17:17 JST
+- Latest：67.80 USD / troy oz
+- Observed：2026-09-23 07:39 JST
 - Source：Yahoo Finance SI=F intraday (query1)
 - Symbol / Type：SI=F / FUTURES_PROXY
-- Freshness：FRESH（age 10.0 min）
+- Freshness：FRESH（age 10.2 min）
 - Market State：UNKNOWN
 - Previous completed daily close：65.82 USD
 
 - 保存済み集計日（UTC）：2026-09-22
 - 価格：65.82 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：DISTRIBUTION / 分配局面
-- Institutional Demand：62.40 / 100
+- Institutional Demand：52.40 / 100
 - Top Risk：37.90 / 100
-- Dip Quality：45.90 / 100
+- Dip Quality：25.00 / 100
 - Confidence：100.0%
 
 ## データの状態
@@ -112,8 +112,8 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - gold_cot：OK
 - silver_cot：OK
 - GLD：OK · 2026-09-21
-- IAU：OK · 2026-09-21
-- SLV：OK · 2026-09-21
+- IAU：OK · 2026-09-22
+- SLV：OK · 2026-09-22
 
 市場指標はそれぞれの観測日が基準です。CFTCは週次、ETF保有量はスポンサー公表日を使用します。
 
