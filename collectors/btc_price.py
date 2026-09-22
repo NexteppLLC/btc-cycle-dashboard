@@ -15,6 +15,8 @@ class BTCPriceCollector(HTTPCollector):
 
     KRAKEN = "https://api.kraken.com/0/public/OHLC"
     COINBASE = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
+    KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
+    COINBASE_TICKER = "https://api.exchange.coinbase.com/products/BTC-USD/ticker"
 
     @staticmethod
     def _point(timestamp: datetime, value: object, source: str, fetched: datetime,
@@ -117,5 +119,49 @@ class BTCPriceCollector(HTTPCollector):
         return [point]
 
     def fetch_latest(self) -> list[MetricPoint]:
-        today = datetime.now(timezone.utc).date()
-        return self.fetch_history(today - timedelta(days=2), today)[-1:]
+        """Fetch a live spot quote, never a daily candle.
+
+        Kraken does not return a quote timestamp, so the completed HTTP response
+        time is the honest observation time. Coinbase's provider timestamp is
+        retained when it is needed as the fallback.
+        """
+        fetched = datetime.now(timezone.utc)
+        errors = []
+        try:
+            payload = self._get_json(self.KRAKEN_TICKER, params={"pair": "XBTUSD"})
+            if payload.get("error"):
+                raise ValueError(str(payload["error"]))
+            ticker = next(iter((payload.get("result") or {}).values()))
+            price, open_24h = float(ticker["c"][0]), float(ticker["o"])
+            if not isfinite(price) or price <= 0:
+                raise ValueError("invalid price")
+            return [MetricPoint(metric_name="btc_price_latest", timestamp=fetched, value=price,
+                source="Kraken Public Ticker", fetched_at=fetched, status=MetricStatus.OK,
+                metadata={"asset":"BTC", "symbol":"XBT/USD", "price_type":"SPOT", "unit":"USD",
+                    "market_state":"OPEN", "freshness":"FRESH", "age_minutes":0.0,
+                    "24h_open":open_24h, "24h_high":float(ticker["h"][1]), "24h_low":float(ticker["l"][1]),
+                    "24h_change":price-open_24h, "24h_change_pct":(price/open_24h-1)*100,
+                    "source_url":self.KRAKEN_TICKER, "provider_timestamp":fetched.isoformat()})]
+        except Exception as exc:
+            errors.append(f"Kraken: {type(exc).__name__}")
+        try:
+            ticker = self._get_json(self.COINBASE_TICKER)
+            observed = datetime.fromisoformat(str(ticker["time"]).replace("Z", "+00:00"))
+            price = float(ticker["price"])
+            if not isfinite(price) or price <= 0 or observed > fetched + timedelta(minutes=2):
+                raise ValueError("invalid price or timestamp")
+            age = max(0.0, (fetched-observed).total_seconds()/60)
+            freshness = "FRESH" if age <= 15 else "DELAYED" if age <= 60 else "STALE"
+            open_24h = float(ticker["open_24h"])
+            return [MetricPoint(metric_name="btc_price_latest", timestamp=observed, value=price,
+                source="Coinbase Exchange Ticker", fetched_at=fetched, status=MetricStatus.OK if freshness != "STALE" else MetricStatus.STALE,
+                metadata={"asset":"BTC", "symbol":"BTC-USD", "price_type":"SPOT", "unit":"USD",
+                    "market_state":"OPEN", "freshness":freshness, "age_minutes":age,
+                    "24h_open":open_24h, "24h_high":float(ticker["high_24h"]), "24h_low":float(ticker["low_24h"]),
+                    "24h_change":price-open_24h, "24h_change_pct":(price/open_24h-1)*100,
+                    "source_url":self.COINBASE_TICKER, "provider_timestamp":observed.isoformat()})]
+        except Exception as exc:
+            errors.append(f"Coinbase: {type(exc).__name__}")
+        point = unavailable("btc_price_latest", "Kraken / Coinbase ticker", MetricStatus.UNAVAILABLE)
+        point.metadata = {"asset":"BTC", "symbol":"XBT/USD", "price_type":"SPOT", "unit":"USD", "error":"; ".join(errors)}
+        return [point]

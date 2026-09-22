@@ -27,6 +27,12 @@ class Metric(Base):
     methodology: Mapped[str | None] = mapped_column(String(160), nullable=True)
     provider_timestamp: Mapped[str | None] = mapped_column(String(50), nullable=True)
     formula: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    market_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    freshness: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    age_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    change_24h_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    previous_report_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class DailySnapshot(Base):

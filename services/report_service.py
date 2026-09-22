@@ -2,6 +2,7 @@
 from math import isfinite
 from pathlib import Path
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 from config.settings import ROOT
 from services.phase_service import phase_status
@@ -11,20 +12,53 @@ def fmt(value, suffix="", digits=2):
     return "取得不可" if value is None or not isfinite(float(value)) else f"{value:,.{digits}f}{suffix}"
 
 
-def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
+def _quote_fields(q):
+    if q is None: return None
+    get = (lambda k, d=None: q.get(k, d)) if isinstance(q, dict) else (lambda k, d=None: getattr(q, k, d))
+    meta = get("metadata", {}) or {}
+    if not meta:  # ORM/Streamlit serialization stores provenance as columns.
+        meta = {k:get(k) for k in ("asset","symbol","price_type","unit","market_state","freshness","age_minutes","change_24h_pct","previous_report_pct")}
+        meta["24h_change_pct"] = meta.pop("change_24h_pct", None)
+    return {"asset":meta.get("asset"), "value":get("value"), "observed":get("timestamp"), "fetched":get("fetched_at"),
+            "source":get("source"), "status":str(get("status")), **meta}
+
+
+def report_text(snapshot, *, metals=(), diagnostics=None, core5=None, quotes=()) -> str:
     as_of = date.fromisoformat(diagnostics["as_of"]) if diagnostics else datetime.now(timezone.utc).date()
     status = phase_status(snapshot.cycle_phase, snapshot.confidence, snapshot.date,
                           diagnostics=diagnostics, as_of=as_of)
     stale, partial = status.stale, status.partial
     reference = "（参考値）" if partial else ""
     phase = status.label
+    quote_map = {x["asset"]:x for x in map(_quote_fields, quotes) if x and x.get("asset")}
+    generated = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Tokyo"))
     text = f"""# BTC / Gold / Silver 日次レポート
 
 保存済み集計日（UTC）：{snapshot.date.isoformat()}
 判定確認日（UTC）：{as_of.isoformat()}
+レポート生成（JST）：{generated:%Y-%m-%d %H:%M}
+
+| 資産 | 最新価格 | 観測時刻 | 24h | 前回レポート比 | 相場局面 | Confidence |
+|---|---:|---|---:|---:|---|---:|
+"""
+    metal_map = {m.asset.upper():m for m in metals}
+    for asset in ("BTC", "GOLD", "SILVER"):
+        q=quote_map.get(asset); m=metal_map.get(asset)
+        unit = "USD" if asset == "BTC" else "USD / troy oz (FUTURES_PROXY)"
+        price = f"${q['value']:,.2f} {unit}" if q and q.get("value") is not None else "N/A"
+        observed = q.get("observed") if q else None
+        if observed and isinstance(observed, str): observed=datetime.fromisoformat(observed)
+        observed_text = observed.astimezone(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d %H:%M JST") if observed and q.get("value") is not None else "N/A"
+        table_phase = snapshot.cycle_phase if asset=="BTC" else getattr(m,"phase","N/A")
+        confidence = snapshot.confidence if asset=="BTC" else getattr(m,"confidence",None)
+        text += f"| {asset} | {price} | {observed_text} | {fmt(q.get('24h_change_pct') if q else None, '%')} | {fmt(q.get('previous_report_pct') if q else None, '%')} | {table_phase} | {fmt(confidence, '%', 1)} |\n"
+    text += """
 
 ## Bitcoin
-- BTC：{fmt(snapshot.btc_price, ' USD', 0)}
+"""
+    bq=quote_map.get("BTC")
+    text += _quote_section("BTC", bq, snapshot.btc_price, "Last UTC Daily Close")
+    text += f"""- BTC確定日足：{fmt(snapshot.btc_price, ' USD', 0)}
 - フェーズ：{phase}
 - Cycle Score{reference}：{fmt(snapshot.cycle_score)} / 100
 - Top Risk{reference}：{fmt(snapshot.top_risk_score)} / 100
@@ -68,6 +102,7 @@ def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
     text += "取得不可の指標は推測・ゼロ補完しません。LTH/STHなどの契約制限は、無料モードでは取得不可として明示します。\n"
     for m in metals:
         text += f"\n## {m.asset.title()}\n"
+        text += _quote_section(m.asset.upper(), quote_map.get(m.asset.upper()), m.price, "Previous completed daily close")
         metal_status = phase_status(m.phase, m.confidence, m.date, m.asset,
                                     diagnostics=diagnostics, as_of=as_of)
         hold, mphase = metal_status.partial, metal_status.label
@@ -91,11 +126,24 @@ def report_text(snapshot, *, metals=(), diagnostics=None, core5=None) -> str:
     return text
 
 
-def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None, core5=None) -> Path:
+def _quote_section(asset, q, daily_close, close_label):
+    if not q or q.get("value") is None:
+        return "- Latest Price：N/A（取得失敗。過去値を今日の価格としてコピーしません）\n"
+    observed=q["observed"]
+    if isinstance(observed, str): observed=datetime.fromisoformat(observed)
+    observed=observed.astimezone(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d %H:%M JST")
+    closed = "\n- 新しい価格観測なし。最終取引価格を表示" if q.get("freshness")=="CLOSED_LAST_QUOTE" else ""
+    return (f"- Latest：{fmt(q['value'], ' USD' if asset=='BTC' else ' USD / troy oz')}\n- Observed：{observed}\n"
+            f"- Source：{q.get('source')}\n- Symbol / Type：{q.get('symbol')} / {q.get('price_type')}\n"
+            f"- Freshness：{q.get('freshness')}（age {fmt(q.get('age_minutes'), ' min', 1)}）\n"
+            f"- Market State：{q.get('market_state')}\n- {close_label}：{fmt(daily_close, ' USD')}\n{closed}\n")
+
+
+def generate_report(snapshot, output_root: Path | None = None, *, metals=(), diagnostics=None, core5=None, quotes=()) -> Path:
     root = output_root or ROOT / "reports"
     archive = root / "archive"
     archive.mkdir(parents=True, exist_ok=True)
-    text = report_text(snapshot, metals=metals, diagnostics=diagnostics, core5=core5)
+    text = report_text(snapshot, metals=metals, diagnostics=diagnostics, core5=core5, quotes=quotes)
     latest = root / "latest.md"
     latest.write_text(text, encoding="utf-8")
     (archive / f"{snapshot.date}.md").write_text(text, encoding="utf-8")

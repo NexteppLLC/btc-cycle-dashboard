@@ -112,5 +112,43 @@ class MetalsPriceCollector(HTTPCollector):
         return [point]
 
     def fetch_latest(self) -> list[MetricPoint]:
-        today = datetime.now(timezone.utc).date()
-        return self.fetch_history(today - timedelta(days=10), today)[-1:]
+        """Return GC/SI intraday futures quote, distinct from daily history."""
+        symbol = "GC=F" if self.asset == "gold" else "SI=F"
+        fetched = datetime.now(timezone.utc)
+        errors = []
+        for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+            url = f"https://{host}/v8/finance/chart/{quote(symbol, safe='')}"
+            try:
+                chart = self._chart(url, {"range":"1d", "interval":"1m", "includePrePost":"true"}).get("chart", {})
+                if chart.get("error") or not chart.get("result"):
+                    raise ValueError("Yahoo chart returned no result")
+                payload = chart["result"][0]; meta = payload.get("meta") or {}
+                ticks = [(t, c) for t, c in zip(payload.get("timestamp") or [],
+                    ((((payload.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or [])) if c is not None]
+                candidates = []
+                if meta.get("regularMarketPrice") is not None and meta.get("regularMarketTime") is not None:
+                    candidates.append((int(meta["regularMarketTime"]), meta["regularMarketPrice"]))
+                candidates.extend(ticks[-1:])
+                if not candidates: raise ValueError("no timestamped quote")
+                epoch, raw = max(candidates, key=lambda x:x[0]); observed = datetime.fromtimestamp(epoch, timezone.utc)
+                value = float(raw)
+                if not isfinite(value) or value <= 0 or observed > fetched + timedelta(minutes=2):
+                    raise ValueError("invalid price or timestamp")
+                age = max(0.0, (fetched-observed).total_seconds()/60)
+                market = str(meta.get("marketState") or "UNKNOWN").upper()
+                closed = market in {"CLOSED", "POST", "PREPRE", "POSTPOST"}
+                freshness = "CLOSED_LAST_QUOTE" if closed else "FRESH" if age <= 15 else "DELAYED" if age <= 60 else "STALE"
+                previous = meta.get("chartPreviousClose") or meta.get("previousClose") or meta.get("regularMarketPreviousClose")
+                change = (value/float(previous)-1)*100 if previous and float(previous)>0 else None
+                return [MetricPoint(metric_name=f"{self.asset}_price_latest", timestamp=observed, value=value,
+                    source=f"Yahoo Finance {symbol} intraday ({host.split('.')[0]})", fetched_at=fetched,
+                    status=MetricStatus.STALE if freshness == "STALE" else MetricStatus.OK,
+                    metadata={"asset":self.asset.upper(), "symbol":symbol, "price_type":"FUTURES_PROXY",
+                        "unit":"USD/troy oz", "market_state":market, "freshness":freshness, "age_minutes":age,
+                        "24h_change_pct":change, "source_url":url, "provider_timestamp":observed.isoformat()})]
+            except Exception as exc:
+                errors.append(f"{host}: {type(exc).__name__}")
+        point = unavailable(f"{self.asset}_price_latest", f"Yahoo Finance {symbol} intraday", MetricStatus.UNAVAILABLE)
+        point.metadata = {"asset":self.asset.upper(), "symbol":symbol, "price_type":"FUTURES_PROXY",
+                          "unit":"USD/troy oz", "error":"; ".join(errors)}
+        return [point]

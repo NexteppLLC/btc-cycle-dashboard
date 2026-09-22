@@ -37,16 +37,21 @@ def metric_diagnostic(metrics, name, as_of):
 def build_diagnostics(metrics, cot, etfs, *, as_of=None, metric_points=0, etf_records=0):
     as_of = as_of or datetime.now(timezone.utc).date()
     sources, warnings, failures = {}, [], []
+    latest_mode = any(str(field(r,"metric_name","")).endswith("_price_latest") for r in metrics)
     for asset in ("btc", "gold", "silver"):
-        name = f"{asset}_price_usd"
-        row = current_metric_row(metrics, name, as_of)
+        name = f"{asset}_price_latest" if latest_mode else f"{asset}_price_usd"
+        candidates = [r for r in metrics if field(r, "metric_name") == name and finite_number(field(r,"value")) is not None]
+        row = max(candidates, key=lambda r: field(r,"timestamp") or observation_date(r)) if candidates else None
+        freshness = field(row,"freshness")
+        acceptable = (row is not None and freshness in {"FRESH","DELAYED","CLOSED_LAST_QUOTE"}) if latest_mode else current_metric_row(metrics,name,as_of) is not None
         sources[name] = {
-            "status": "OK" if row is not None else "UNAVAILABLE_OR_STALE",
+            "status": "OK" if acceptable else "UNAVAILABLE_OR_STALE",
             "source": field(row, "source"),
             "effective_date": str(observation_date(row)) if row is not None else None,
             "price_type": field(row, "price_type"),
         }
-        if row is None:
+        sources[f"{asset}_price_usd"] = sources[name]
+        if not acceptable:
             failures.append(f"{asset.upper()}: fresh measured price unavailable")
     mvrv = current_metric_row(metrics, "global_mvrv", as_of)
     sources["global_mvrv"] = {"status": "OK" if mvrv is not None else "UNAVAILABLE_OR_STALE"}
@@ -91,7 +96,8 @@ def build_diagnostics(metrics, cot, etfs, *, as_of=None, metric_points=0, etf_re
     cfg = load_thresholds()
     eligibility = {"btc": btc_input_eligibility(values, flow, coverage, cfg)}
     for asset in ("gold", "silver"):
-        eligible = all(sources[f"{asset}_{suffix}"]["status"] == "OK" for suffix in ("price_usd", "cot"))
+        price_key = f"{asset}_price_latest" if latest_mode else f"{asset}_price_usd"
+        eligible = sources[price_key]["status"] == "OK" and sources[f"{asset}_cot"]["status"] == "OK"
         eligibility[asset] = {"minimum_met": eligible}
     return {"as_of": as_of.isoformat(), "metric_points": metric_points, "etf_records": etf_records,
             "status": "error" if failures else "degraded" if warnings else "ok",
