@@ -21,7 +21,11 @@ class Repository:
                       "asset": point.metadata.get("asset"), "price_type": point.metadata.get("price_type"),
                       "effective_date": effective_date, "error": point.metadata.get("error"),
                       "unit": point.metadata.get("unit"), "methodology": point.metadata.get("methodology"),
-                      "provider_timestamp": point.metadata.get("provider_timestamp"), "formula": point.metadata.get("formula")}
+                      "provider_timestamp": point.metadata.get("provider_timestamp"), "formula": point.metadata.get("formula"),
+                      "symbol": point.metadata.get("symbol"), "market_state": point.metadata.get("market_state"),
+                      "freshness": point.metadata.get("freshness"), "age_minutes": point.metadata.get("age_minutes"),
+                      "change_24h_pct": point.metadata.get("24h_change_pct"),
+                      "previous_report_pct": point.metadata.get("previous_report_pct")}
             if row:
                 for name, value in values.items(): setattr(row, name, value)
             else: self.session.add(Metric(**values))

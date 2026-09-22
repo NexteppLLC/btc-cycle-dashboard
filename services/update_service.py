@@ -6,6 +6,7 @@ import pandas as pd
 import yaml
 
 from collectors.btc_price import BTCPriceCollector
+from collectors.base import MetricStatus
 from collectors.etf_flow import ETFFlowCollector
 from collectors.glassnode import GlassnodeCollector
 from collectors.onchain import OnChainCollector
@@ -208,11 +209,20 @@ def run_update(days: int = 1500) -> dict:
     create_schema()
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=days)
-    collectors = [BTCPriceCollector(timeout=settings.http_timeout_seconds), OnChainCollector(timeout=settings.http_timeout_seconds),
+    # Live quotes are deliberately collected first and persisted in separate
+    # metrics. They never enter completed-daily technical series.
+    price_collectors = [BTCPriceCollector(timeout=settings.http_timeout_seconds),
+                        MetalsPriceCollector("gold", timeout=settings.http_timeout_seconds),
+                        MetalsPriceCollector("silver", timeout=settings.http_timeout_seconds)]
+    latest_points = []
+    for collector in price_collectors:
+        try: latest_points.extend(collector.fetch_latest())
+        except Exception as exc: logger.error("Latest quote boundary failure: %s", type(exc).__name__)
+    collectors = [price_collectors[0], OnChainCollector(timeout=settings.http_timeout_seconds),
                   GlassnodeCollector(settings.glassnode_api_key, timeout=settings.http_timeout_seconds),
                   ETFFlowCollector(settings.etf_flow_csv_url, timeout=settings.http_timeout_seconds)]
-    collectors += [MetalsPriceCollector(asset, timeout=settings.http_timeout_seconds) for asset in ("gold", "silver")]
-    points = []
+    collectors += price_collectors[1:]
+    points = list(latest_points)
     for collector in collectors:
         try:
             points.extend(collector.fetch_history(start, end))
@@ -220,6 +230,17 @@ def run_update(days: int = 1500) -> dict:
             logger.error("Collector boundary failure: %s", type(exc).__name__)
     with session_scope() as session:
         repo = Repository(session)
+        previous_rows = repo.metrics()
+        for point in latest_points:
+            if point.value is None or point.status != MetricStatus.OK:
+                continue
+            same = [r for r in previous_rows if field(r,"metric_name") == point.metric_name
+                    and field(r,"status") == "OK" and field(r,"value") is not None
+                    and field(r,"symbol") == point.metadata.get("symbol")
+                    and field(r,"price_type") == point.metadata.get("price_type")]
+            if same:
+                prior=max(same,key=lambda r:field(r,"timestamp"))
+                if prior.value > 0: point.metadata["previous_report_pct"]=(point.value/prior.value-1)*100
         repo.upsert_metrics(points)
         session.flush()
         try:
@@ -265,5 +286,5 @@ def run_update(days: int = 1500) -> dict:
             metal_snapshots.append(repo.upsert_metal_snapshot({"asset": asset.upper(), "date": end, "price": metal_values["price"],
                                    "demand_score": scores.demand, "top_risk_score": scores.top_risk, "dip_quality_score": scores.dip_quality,
                                    "phase": scores.phase, "confidence": scores.confidence, "divergence": scores.divergence}))
-        return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points),
+        return {"snapshot": snapshot, "metals": metal_snapshots, "points": len(points), "latest_quotes": latest_points,
                 "etf_records": etf_saved, "distribution_coverage": dist_coverage, "core5": core5}

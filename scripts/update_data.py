@@ -28,7 +28,8 @@ if __name__ == "__main__":
         diagnostics = build_diagnostics(repo.metrics(), repo.cot("gold") + repo.cot("silver"),
                                         repo.etf_holdings(), metric_points=result["points"],
                                         etf_records=result["etf_records"])
-    path = generate_report(result["snapshot"], metals=result["metals"], diagnostics=diagnostics, core5=result["core5"])
+    path = generate_report(result["snapshot"], metals=result["metals"], diagnostics=diagnostics, core5=result["core5"],
+                           quotes=result["latest_quotes"])
     if args.diagnostics_json:
         args.diagnostics_json.parent.mkdir(parents=True, exist_ok=True)
         args.diagnostics_json.write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8")

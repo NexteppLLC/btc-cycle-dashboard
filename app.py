@@ -69,6 +69,18 @@ def latest_fund_rows(asset=None, fresh_only=False):
 
 
 snapshots, metrics, metal_snapshots, cot, etfs = load_data(); latest = snapshots[-1] if snapshots else None
+def latest_quote(asset):
+    rows = [x for x in metrics if x["metric_name"] == f"{asset.lower()}_price_latest"]
+    attempted = max(rows, key=lambda x:x["fetched_at"]) if rows else None
+    return attempted if attempted and attempted["status"] in ("OK", "STALE") and attempted["value"] is not None else None
+
+def quote_previous_change(asset, current):
+    rows = sorted([x for x in metrics if x["metric_name"] == f"{asset.lower()}_price_latest" and x["status"] == "OK"
+                   and x["value"] is not None and x["price_type"] == current["price_type"] and x["symbol"] == current["symbol"]], key=lambda x:x["timestamp"])
+    prior = [x for x in rows if x["timestamp"] < current["timestamp"]]
+    return (current["value"]/prior[-1]["value"]-1)*100 if prior and prior[-1]["value"] else None
+
+latest_quotes = {a:latest_quote(a) for a in ("BTC","GOLD","SILVER")}
 quality = build_diagnostics(metrics, cot, etfs)
 core5 = build_core5(metrics, snapshots, load_thresholds()["btc_core5"])
 with st.sidebar:
@@ -86,7 +98,7 @@ with st.sidebar:
                     repo = Repository(session)
                     updated_quality = build_diagnostics(repo.metrics(), repo.cot("gold") + repo.cot("silver"), repo.etf_holdings())
                 generate_report(result["snapshot"], metals=result["metals"], diagnostics=updated_quality,
-                                core5=result["core5"])
+                                core5=result["core5"], quotes=result["latest_quotes"])
                 load_data.clear()
                 st.rerun()
             except Exception as exc:
@@ -96,7 +108,8 @@ with st.sidebar:
         st.caption(f"保存済み集計日（UTC）：{latest['date']}")
         report_metals = {x["asset"]: x for x in metal_snapshots}
         st.download_button("日次レポートを保存", report_text(SimpleNamespace(**latest),
-                           metals=[SimpleNamespace(**m) for m in report_metals.values()], diagnostics=quality, core5=core5),
+                           metals=[SimpleNamespace(**m) for m in report_metals.values()], diagnostics=quality, core5=core5,
+                           quotes=[q for q in latest_quotes.values() if q]),
                            file_name=f"market-cycle-{latest['date']}.md", mime="text/markdown")
 st.title("₿ BTC MARKET CYCLE")
 st.caption("価格・オンチェーン・保有者行動・ETF需要を複合評価する分析支援ツール")
@@ -129,9 +142,12 @@ with tabs[0]:
     latest_metals = {x["asset"]: x for x in metal_snapshots if x["date"] == max((m["date"] for m in metal_snapshots), default=None)}
     st.subheader("3資産クイック比較")
     for col, asset in zip(st.columns(3), ("BTC", "GOLD", "SILVER")):
-        if asset == "BTC" and latest: col.markdown(f"**BTC**  \nPrice {shown(latest['btc_price'])} · Cycle {shown(latest['cycle_score'])} · Top {shown(latest['top_risk_score'])}  \n**{safe_phase(latest['cycle_phase'], latest['confidence'], latest['date'])}** · Confidence {shown(latest['confidence'])}%")
-        elif asset in latest_metals:
-            m=latest_metals[asset]; col.markdown(f"**{asset}**  \nPrice {shown(m['price'])} · Demand {shown(m['demand_score'])} · Top {shown(m['top_risk_score'])} · Dip {shown(m['dip_quality_score'])}  \n**{safe_phase(m['phase'], m['confidence'], m['date'], m['asset'])}** · Confidence {shown(m['confidence'])}%")
+        q=latest_quotes.get(asset)
+        if q:
+            observed=pd.Timestamp(q["timestamp"]).tz_convert("Asia/Tokyo") if pd.Timestamp(q["timestamp"]).tzinfo else pd.Timestamp(q["timestamp"], tz="UTC").tz_convert("Asia/Tokyo")
+            previous=quote_previous_change(asset,q)
+            col.markdown(f"**{asset} Latest Price**  \n${q['value']:,.2f} · {q['unit']}  \nObserved At {observed:%Y-%m-%d %H:%M} JST  \nSource {q['source']} · {q['price_type']} / {q['symbol']}  \nFreshness **{q['freshness']}** · 24h {shown(q['change_24h_pct'])}% · Previous Report {shown(previous)}%")
+        else: col.markdown(f"**{asset} Latest Price**  \nN/A — 最新価格の取得失敗（確定日足を代用しません）")
 
 metric_df = pd.DataFrame(metrics)
 with tabs[1]:
@@ -343,6 +359,13 @@ with tabs[6]:
     st.header("System / Data Provenance")
     st.write("モード:", "GLASSNODE MODE" if get_settings().glassnode_api_key else "FREE MODE")
     if not get_settings().glassnode_api_key: st.info("無料モードでは、公開価格・Global MVRV・金銀ETF・CFTCを利用します。LTH/STH高度指標は対応するGlassnode契約とAPIキーが必要です。欠損があるBTCの正式判定は保留されます。")
+    quote_df = metric_df[metric_df.metric_name.str.endswith("_price_latest")].copy() if not metric_df.empty else pd.DataFrame()
+    if not quote_df.empty:
+        now=pd.Timestamp.now(tz="UTC"); observed=pd.to_datetime(quote_df.timestamp, utc=True)
+        quote_df["age_minutes"]=(now-observed).dt.total_seconds()/60
+        quote_df=quote_df.rename(columns={"value":"latest_price"})
+        st.subheader("Latest price source diagnostics")
+        st.dataframe(quote_df[["asset","symbol","latest_price","timestamp","fetched_at","age_minutes","freshness","market_state","source","status","error"]].sort_values("fetched_at",ascending=False), hide_index=True, width="stretch")
     if not metric_df.empty: st.dataframe(metric_df[["date", "metric_name", "value", "source", "status", "fetched_at"]].sort_values("fetched_at", ascending=False), hide_index=True, width="stretch")
     st.subheader("Gold / Silver sources")
     st.write("CFTC Public Reporting (official):", "OK" if all(quality["sources"][f"{a}_cot"]["status"] == "OK" for a in ("gold", "silver")) else "PARTIAL / STALE")
