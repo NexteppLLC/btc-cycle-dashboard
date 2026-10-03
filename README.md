@@ -134,7 +134,7 @@ python scripts/backfill.py --asset silver --start 2020-01-01 --end 2026-09-01
 ## 自動更新と検証
 
 - `tests.yml`: push / PRで外部APIを使わない回帰テスト。空DB・既存DBの画面実行も含みます。
-- `daily_update.yml`: 毎日07:45日本時間、手動実行、mainのソース変更後に更新します。
+- `daily_update.yml`: 毎日10:17日本時間（2026-10-01に07:45から変更。前日UTC分のBTC終値が確定・公表された後に取得し、翌朝06:50のSAF入力締切に間に合わせるため）、手動実行、mainのソース変更後に更新します。GitHub Actionsの定時実行は数時間遅れることがあります。
 - 日次更新は直列実行です。DB・レポートのみのbotコミットから再帰的に更新を起動しません。
 - ActionsのSummaryに、MVRV・価格・CFTC・GLD/IAU/SLVの取得状態を表示します。任意データの欠損も警告で確認できます。
 - LTH/STH MVRVやBTC ETFフローの不足も取得状況に表示します。有料指標やCSV取得先が未設定でも無料データの保存は継続しますが、「一部取得不可」として報告します。

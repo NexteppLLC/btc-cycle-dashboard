@@ -8,7 +8,8 @@ on:
       - "requirements.txt"
       - ".github/workflows/daily_update.yml"
   schedule:
-    - cron: "45 22 * * *" # 07:45 JST (UTC+9)
+    - cron: "17 1 * * *" # 10:17 JST (UTC+9): after the prior UTC day's BTC close is final and published,
+                         # and well before SAF's 06:50 JST input cutoff the next morning (2026-10-01 decision)
   workflow_dispatch:
 
 permissions:
