@@ -8,8 +8,11 @@ on:
       - "requirements.txt"
       - ".github/workflows/daily_update.yml"
   schedule:
-    - cron: "17 1 * * *" # 10:17 JST (UTC+9): after the prior UTC day's BTC close is final and published,
-                         # and well before SAF's 06:50 JST input cutoff the next morning (2026-10-01 decision)
+    - cron: "17 6 * * *" # 15:17 JST (UTC+9) = 02:17 EDT / 01:17 EST: after New York midnight in both DST
+                         # seasons, so the run includes the prior New York session's metals close (same-day
+                         # closes are excluded until the New York date changes) as well as the prior UTC day's
+                         # BTC close. SAF's 06:50 JST cutoff the next morning then sees both even when GitHub
+                         # starts the run up to ~15 h late (2026-10-08 decision; was 10:17 JST from 2026-10-01)
   workflow_dispatch:
 
 permissions:
