@@ -19,6 +19,23 @@ DEFAULT_SYMBOLS = {
     "silver": (("XAGUSD=X", "SPOT"), ("SI=F", "FUTURES_PROXY"), ("SLV", "ETF_PROXY")),
 }
 
+# CME Globex gold/silver futures pause for the weekend from Friday 17:00 to Sunday 18:00
+# New York time. Yahoo does not always report a closed marketState for GC=F/SI=F during
+# that pause, so the calendar decides there. Exchange holidays are not modelled: a quote
+# older than the end of the Friday session still counts as stale.
+WEEKEND_LAST_QUOTE_TOLERANCE = timedelta(hours=4)
+
+
+def comex_weekend_closure_start(now: datetime) -> datetime | None:
+    """Friday 17:00 New York time when `now` is inside the weekend pause, else None."""
+    new_york = ZoneInfo("America/New_York")
+    local = now.astimezone(new_york)
+    friday = local.date() - timedelta(days=(local.weekday() - 4) % 7)
+    start = datetime(friday.year, friday.month, friday.day, 17, tzinfo=new_york)
+    sunday = friday + timedelta(days=2)
+    end = datetime(sunday.year, sunday.month, sunday.day, 18, tzinfo=new_york)
+    return start if start <= local < end else None
+
 
 class MetalsPriceCollector(HTTPCollector):
     def __init__(self, asset: str, symbols=None, **kwargs):
@@ -137,6 +154,9 @@ class MetalsPriceCollector(HTTPCollector):
                 age = max(0.0, (fetched-observed).total_seconds()/60)
                 market = str(meta.get("marketState") or "UNKNOWN").upper()
                 closed = market in {"CLOSED", "POST", "PREPRE", "POSTPOST"}
+                weekend = comex_weekend_closure_start(fetched)
+                if not closed and weekend is not None and observed >= weekend - WEEKEND_LAST_QUOTE_TOLERANCE:
+                    closed = True  # Friday's last quote is the current price until Sunday's reopen
                 freshness = "CLOSED_LAST_QUOTE" if closed else "FRESH" if age <= 15 else "DELAYED" if age <= 60 else "STALE"
                 previous = meta.get("chartPreviousClose") or meta.get("previousClose") or meta.get("regularMarketPreviousClose")
                 change = (value/float(previous)-1)*100 if previous and float(previous)>0 else None
