@@ -49,6 +49,8 @@ def build_diagnostics(metrics, cot, etfs, *, as_of=None, metric_points=0, etf_re
             "source": field(row, "source"),
             "effective_date": str(observation_date(row)) if row is not None else None,
             "price_type": field(row, "price_type"),
+            "freshness": freshness,
+            "market_state": field(row, "market_state"),
         }
         sources[f"{asset}_price_usd"] = sources[name]
         if not acceptable:
