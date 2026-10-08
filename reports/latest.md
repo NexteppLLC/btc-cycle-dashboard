@@ -2,18 +2,18 @@
 
 保存済み集計日（UTC）：2026-10-08
 判定確認日（UTC）：2026-10-08
-レポート生成（JST）：2026-10-08 13:30
+レポート生成（JST）：2026-10-08 22:37
 
 | 資産 | 最新価格 | 観測時刻 | 24h | 前回レポート比 | 相場局面 | Confidence |
 |---|---:|---|---:|---:|---|---:|
-| BTC | $82,821.10 USD | 2026-10-08 13:29 JST | -0.55% | -1.59% | PARTIAL | 25.0% |
-| GOLD | $4,160.40 USD / troy oz (FUTURES_PROXY) | 2026-10-08 13:19 JST | 0.48% | 0.03% | DISTRIBUTION | 100.0% |
-| SILVER | $60.37 USD / troy oz (FUTURES_PROXY) | 2026-10-08 13:19 JST | 0.12% | -0.81% | BEAR | 100.0% |
+| BTC | $82,093.10 USD | 2026-10-08 22:37 JST | -1.42% | -0.88% | PARTIAL | 25.0% |
+| GOLD | $4,145.40 USD / troy oz (FUTURES_PROXY) | 2026-10-08 22:27 JST | 0.11% | -0.36% | DISTRIBUTION | 100.0% |
+| SILVER | $59.31 USD / troy oz (FUTURES_PROXY) | 2026-10-08 22:27 JST | -1.63% | -1.75% | BEAR | 100.0% |
 
 
 ## Bitcoin
-- Latest：82,821.10 USD
-- Observed：2026-10-08 13:29 JST
+- Latest：82,093.10 USD
+- Observed：2026-10-08 22:37 JST
 - Source：Kraken Public Ticker
 - Symbol / Type：XBT/USD / SPOT
 - Freshness：FRESH（age 0.0 min）
@@ -52,8 +52,8 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 取得不可の指標は推測・ゼロ補完しません。LTH/STHなどの契約制限は、無料モードでは取得不可として明示します。
 
 ## Gold
-- Latest：4,160.40 USD / troy oz
-- Observed：2026-10-08 13:19 JST
+- Latest：4,145.40 USD / troy oz
+- Observed：2026-10-08 22:27 JST
 - Source：Yahoo Finance GC=F intraday (query1)
 - Symbol / Type：GC=F / FUTURES_PROXY
 - Freshness：FRESH（age 10.0 min）
@@ -69,8 +69,8 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - Confidence：100.0%
 
 ## Silver
-- Latest：60.37 USD / troy oz
-- Observed：2026-10-08 13:19 JST
+- Latest：59.31 USD / troy oz
+- Observed：2026-10-08 22:27 JST
 - Source：Yahoo Finance SI=F intraday (query1)
 - Symbol / Type：SI=F / FUTURES_PROXY
 - Freshness：FRESH（age 10.1 min）
