@@ -1,31 +1,31 @@
 # BTC / Gold / Silver 日次レポート
 
-保存済み集計日（UTC）：2026-10-22
-判定確認日（UTC）：2026-10-22
-レポート生成（JST）：2026-10-22 21:00
+保存済み集計日（UTC）：2026-10-23
+判定確認日（UTC）：2026-10-23
+レポート生成（JST）：2026-10-23 20:45
 
 | 資産 | 最新価格 | 観測時刻 | 24h | 前回レポート比 | 相場局面 | Confidence |
 |---|---:|---|---:|---:|---|---:|
-| BTC | $81,658.00 USD | 2026-10-22 20:59 JST | -2.81% | -2.12% | PARTIAL | 25.0% |
-| GOLD | $4,081.10 USD / troy oz (FUTURES_PROXY) | 2026-10-22 20:49 JST | -1.66% | -1.81% | BEAR | 100.0% |
-| SILVER | $55.80 USD / troy oz (FUTURES_PROXY) | 2026-10-22 20:49 JST | -3.30% | -3.43% | BEAR | 100.0% |
+| BTC | $81,576.50 USD | 2026-10-23 20:45 JST | 0.32% | -0.10% | PARTIAL | 15.0% |
+| GOLD | $4,039.30 USD / troy oz (FUTURES_PROXY) | 2026-10-23 20:35 JST | -0.52% | -1.02% | BEAR | 100.0% |
+| SILVER | $54.01 USD / troy oz (FUTURES_PROXY) | 2026-10-23 20:35 JST | -1.81% | -3.22% | BEAR | 100.0% |
 
 
 ## Bitcoin
-- Latest：81,658.00 USD
-- Observed：2026-10-22 20:59 JST
+- Latest：81,576.50 USD
+- Observed：2026-10-23 20:45 JST
 - Source：Kraken Public Ticker
 - Symbol / Type：XBT/USD / SPOT
 - Freshness：FRESH（age 0.0 min）
 - Market State：OPEN
-- Last UTC Daily Close：84,022.50 USD
+- Last UTC Daily Close：81,315.90 USD
 
-- BTC確定日足：84,022 USD
+- BTC確定日足：81,316 USD
 - フェーズ：判定保留 / PARTIAL
-- Cycle Score（参考値）：29.37 / 100
-- Top Risk（参考値）：6.14 / 100
-- Confidence（データ充足度）：25.0%
-- Global MVRV：1.56
+- Cycle Score（参考値）：25.78 / 100
+- Top Risk（参考値）：1.90 / 100
+- Confidence（データ充足度）：15.0%
+- Global MVRV：取得不可
 - MVRV Z-Score：取得不可
 - LTH-MVRV：取得不可
 - STH-MVRV：取得不可
@@ -34,11 +34,11 @@
 - ETF 最新観測日を含む7暦日合計：取得不可
 
 ## BTC 5-Signal Monitor
-- STH-MVRV：取得不可 · 観測日 2026-10-22 · Status UNAVAILABLE_NO_API_KEY
-- STH-SOPR：取得不可 · 観測日 2026-10-22 · Status UNAVAILABLE_NO_API_KEY
-- LTH-MVRV：取得不可 · 観測日 2026-10-22 · Status UNAVAILABLE_NO_API_KEY
+- STH-MVRV：取得不可 · 観測日 2026-10-23 · Status UNAVAILABLE_NO_API_KEY
+- STH-SOPR：取得不可 · 観測日 2026-10-23 · Status UNAVAILABLE_NO_API_KEY
+- LTH-MVRV：取得不可 · 観測日 2026-10-23 · Status UNAVAILABLE_NO_API_KEY
 - LTH Distribution：取得不可 · 観測日 取得不可 · Status UNAVAILABLE
-- Sell-Side Risk 15日SMA：取得不可 · 観測日 2026-10-22 · Status UNAVAILABLE_NO_API_KEY · 理由 Sell-Side input request unavailable
+- Sell-Side Risk 15日SMA：取得不可 · 観測日 2026-10-23 · Status UNAVAILABLE_NO_API_KEY · 理由 Sell-Side input request unavailable
 - Short-Term Health：PARTIAL
 - Cycle Heat：PARTIAL
 - Distribution Pressure：PARTIAL
@@ -52,16 +52,16 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 取得不可の指標は推測・ゼロ補完しません。LTH/STHなどの契約制限は、無料モードでは取得不可として明示します。
 
 ## Gold
-- Latest：4,081.10 USD / troy oz
-- Observed：2026-10-22 20:49 JST
+- Latest：4,039.30 USD / troy oz
+- Observed：2026-10-23 20:35 JST
 - Source：Yahoo Finance GC=F intraday (query1)
 - Symbol / Type：GC=F / FUTURES_PROXY
 - Freshness：FRESH（age 10.1 min）
 - Market State：UNKNOWN
-- Previous completed daily close：4,150.00 USD
+- Previous completed daily close：4,060.40 USD
 
-- 保存済み集計日（UTC）：2026-10-22
-- 価格：4,150.00 USD（現物・先物・ETF代理値の区別はソース参照）
+- 保存済み集計日（UTC）：2026-10-23
+- 価格：4,060.40 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：BEAR / 弱気相場
 - Institutional Demand：38.20 / 100
 - Top Risk：34.30 / 100
@@ -69,32 +69,32 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - Confidence：100.0%
 
 ## Silver
-- Latest：55.80 USD / troy oz
-- Observed：2026-10-22 20:49 JST
+- Latest：54.01 USD / troy oz
+- Observed：2026-10-23 20:35 JST
 - Source：Yahoo Finance SI=F intraday (query1)
 - Symbol / Type：SI=F / FUTURES_PROXY
 - Freshness：FRESH（age 10.1 min）
 - Market State：UNKNOWN
-- Previous completed daily close：57.42 USD
+- Previous completed daily close：54.76 USD
 
-- 保存済み集計日（UTC）：2026-10-22
-- 価格：57.42 USD（現物・先物・ETF代理値の区別はソース参照）
+- 保存済み集計日（UTC）：2026-10-23
+- 価格：54.76 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：BEAR / 弱気相場
-- Institutional Demand：32.10 / 100
+- Institutional Demand：37.10 / 100
 - Top Risk：20.80 / 100
-- Dip Quality：25.00 / 100
+- Dip Quality：42.10 / 100
 - Confidence：100.0%
 
 ## データの状態
 更新結果：一部取得不可
 
-- btc_price_latest：OK · Kraken Public Ticker / SPOT / 2026-10-22
-- btc_price_usd：OK · Kraken Public Ticker / SPOT / 2026-10-22
-- gold_price_latest：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-22
-- gold_price_usd：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-22
-- silver_price_latest：OK · Yahoo Finance SI=F intraday (query1) / FUTURES_PROXY / 2026-10-22
-- silver_price_usd：OK · Yahoo Finance SI=F intraday (query1) / FUTURES_PROXY / 2026-10-22
-- global_mvrv：OK
+- btc_price_latest：OK · Kraken Public Ticker / SPOT / 2026-10-23
+- btc_price_usd：OK · Kraken Public Ticker / SPOT / 2026-10-23
+- gold_price_latest：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-23
+- gold_price_usd：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-23
+- silver_price_latest：OK · Yahoo Finance SI=F intraday (query1) / FUTURES_PROXY / 2026-10-23
+- silver_price_usd：OK · Yahoo Finance SI=F intraday (query1) / FUTURES_PROXY / 2026-10-23
+- global_mvrv：UNAVAILABLE_OR_STALE
 - lth_mvrv：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
 - sth_mvrv：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
 - mvrv_zscore：UNAVAILABLE_NO_API_KEY · Glassnode API v1 availability
@@ -111,9 +111,9 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - sell_side_risk_15d：UNAVAILABLE_NO_API_KEY · Glassnode API v1 Sell-Side Risk availability
 - gold_cot：OK
 - silver_cot：OK
-- GLD：OK · 2026-10-21
-- IAU：OK · 2026-10-21
-- SLV：OK · 2026-10-21
+- GLD：OK · 2026-10-22
+- IAU：OK · 2026-10-22
+- SLV：OK · 2026-10-22
 
 市場指標はそれぞれの観測日が基準です。CFTCは週次、ETF保有量はスポンサー公表日を使用します。
 
