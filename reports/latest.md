@@ -1,31 +1,31 @@
 # BTC / Gold / Silver 日次レポート
 
-保存済み集計日（UTC）：2026-10-24
-判定確認日（UTC）：2026-10-24
-レポート生成（JST）：2026-10-24 20:09
+保存済み集計日（UTC）：2026-10-25
+判定確認日（UTC）：2026-10-25
+レポート生成（JST）：2026-10-25 20:39
 
 | 資産 | 最新価格 | 観測時刻 | 24h | 前回レポート比 | 相場局面 | Confidence |
 |---|---:|---|---:|---:|---|---:|
-| BTC | $80,553.60 USD | 2026-10-24 20:09 JST | -0.66% | -1.25% | PARTIAL | 25.0% |
-| GOLD | $4,007.90 USD / troy oz (FUTURES_PROXY) | 2026-10-24 05:59 JST | -1.29% | -0.78% | BEAR | 100.0% |
-| SILVER | $53.95 USD / troy oz (FUTURES_PROXY) | 2026-10-24 05:59 JST | -1.92% | -0.11% | DISTRIBUTION | 100.0% |
+| BTC | $80,312.00 USD | 2026-10-25 20:39 JST | -0.57% | -0.30% | PARTIAL | 25.0% |
+| GOLD | $4,007.90 USD / troy oz (FUTURES_PROXY) | 2026-10-24 05:59 JST | -1.29% | 0.00% | BEAR | 100.0% |
+| SILVER | $53.95 USD / troy oz (FUTURES_PROXY) | 2026-10-24 05:59 JST | -1.92% | 0.00% | DISTRIBUTION | 100.0% |
 
 
 ## Bitcoin
-- Latest：80,553.60 USD
-- Observed：2026-10-24 20:09 JST
+- Latest：80,312.00 USD
+- Observed：2026-10-25 20:39 JST
 - Source：Kraken Public Ticker
 - Symbol / Type：XBT/USD / SPOT
 - Freshness：FRESH（age 0.0 min）
 - Market State：OPEN
-- Last UTC Daily Close：81,086.20 USD
+- Last UTC Daily Close：80,771.90 USD
 
-- BTC確定日足：81,086 USD
+- BTC確定日足：80,772 USD
 - フェーズ：判定保留 / PARTIAL
-- Cycle Score（参考値）：28.12 / 100
-- Top Risk（参考値）：1.44 / 100
+- Cycle Score（参考値）：27.63 / 100
+- Top Risk（参考値）：0.89 / 100
 - Confidence（データ充足度）：25.0%
-- Global MVRV：1.50
+- Global MVRV：1.49
 - MVRV Z-Score：取得不可
 - LTH-MVRV：取得不可
 - STH-MVRV：取得不可
@@ -34,11 +34,11 @@
 - ETF 最新観測日を含む7暦日合計：取得不可
 
 ## BTC 5-Signal Monitor
-- STH-MVRV：取得不可 · 観測日 2026-10-24 · Status UNAVAILABLE_NO_API_KEY
-- STH-SOPR：取得不可 · 観測日 2026-10-24 · Status UNAVAILABLE_NO_API_KEY
-- LTH-MVRV：取得不可 · 観測日 2026-10-24 · Status UNAVAILABLE_NO_API_KEY
+- STH-MVRV：取得不可 · 観測日 2026-10-25 · Status UNAVAILABLE_NO_API_KEY
+- STH-SOPR：取得不可 · 観測日 2026-10-25 · Status UNAVAILABLE_NO_API_KEY
+- LTH-MVRV：取得不可 · 観測日 2026-10-25 · Status UNAVAILABLE_NO_API_KEY
 - LTH Distribution：取得不可 · 観測日 取得不可 · Status UNAVAILABLE
-- Sell-Side Risk 15日SMA：取得不可 · 観測日 2026-10-24 · Status UNAVAILABLE_NO_API_KEY · 理由 Sell-Side input request unavailable
+- Sell-Side Risk 15日SMA：取得不可 · 観測日 2026-10-25 · Status UNAVAILABLE_NO_API_KEY · 理由 Sell-Side input request unavailable
 - Short-Term Health：PARTIAL
 - Cycle Heat：PARTIAL
 - Distribution Pressure：PARTIAL
@@ -56,12 +56,12 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - Observed：2026-10-24 05:59 JST
 - Source：Yahoo Finance GC=F intraday (query1)
 - Symbol / Type：GC=F / FUTURES_PROXY
-- Freshness：CLOSED_LAST_QUOTE（age 849.1 min）
+- Freshness：CLOSED_LAST_QUOTE（age 2,319.4 min）
 - Market State：UNKNOWN
 - Previous completed daily close：4,007.90 USD
 
 - 新しい価格観測なし。最終取引価格を表示
-- 保存済み集計日（UTC）：2026-10-24
+- 保存済み集計日（UTC）：2026-10-25
 - 価格：4,007.90 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：BEAR / 弱気相場
 - Institutional Demand：37.60 / 100
@@ -74,13 +74,13 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 - Observed：2026-10-24 05:59 JST
 - Source：Yahoo Finance SI=F intraday (query1)
 - Symbol / Type：SI=F / FUTURES_PROXY
-- Freshness：CLOSED_LAST_QUOTE（age 849.2 min）
+- Freshness：CLOSED_LAST_QUOTE（age 2,319.5 min）
 - Market State：UNKNOWN
-- Previous completed daily close：53.71 USD
+- Previous completed daily close：53.95 USD
 
 - 新しい価格観測なし。最終取引価格を表示
-- 保存済み集計日（UTC）：2026-10-24
-- 価格：53.71 USD（現物・先物・ETF代理値の区別はソース参照）
+- 保存済み集計日（UTC）：2026-10-25
+- 価格：53.95 USD（現物・先物・ETF代理値の区別はソース参照）
 - フェーズ：DISTRIBUTION / 分配局面
 - Institutional Demand：41.50 / 100
 - Top Risk：22.70 / 100
@@ -90,8 +90,8 @@ Core 5は既存スコアと独立した観測レイヤーです。オンチェ�
 ## データの状態
 更新結果：一部取得不可
 
-- btc_price_latest：OK · Kraken Public Ticker / SPOT / 2026-10-24
-- btc_price_usd：OK · Kraken Public Ticker / SPOT / 2026-10-24
+- btc_price_latest：OK · Kraken Public Ticker / SPOT / 2026-10-25
+- btc_price_usd：OK · Kraken Public Ticker / SPOT / 2026-10-25
 - gold_price_latest：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-23
 - gold_price_usd：OK · Yahoo Finance GC=F intraday (query1) / FUTURES_PROXY / 2026-10-23
 - silver_price_latest：OK · Yahoo Finance SI=F intraday (query1) / FUTURES_PROXY / 2026-10-23
